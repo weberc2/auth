@@ -23,10 +23,31 @@ func DefaultClient(baseURL string) Client {
 	}
 }
 
-func (c *Client) Refresh(refreshToken string) (*auth.TokenDetails, error) {
-	data, err := json.Marshal(struct {
-		RefreshToken string `json:"refreshToken"`
-	}{refreshToken})
+func (c *Client) Logout(refreshToken string) error {
+	data, err := (&refresh{refreshToken}).marshal()
+	if err != nil {
+		return fmt.Errorf("logging out: %w", err)
+	}
+
+	rsp, err := c.HTTP.Post(
+		c.BaseURL+"/api/logout",
+		"application/json",
+		bytes.NewReader(data),
+	)
+	if err != nil {
+		return fmt.Errorf("logging out: %w", err)
+	}
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"logging out: status code: wanted `200`; found `%d`",
+			rsp.StatusCode,
+		)
+	}
+	return nil
+}
+
+func (c *Client) Refresh(refreshToken string) (*auth.RefreshResponse, error) {
+	data, err := (&refresh{refreshToken}).marshal()
 	if err != nil {
 		return nil, fmt.Errorf("marshaling refresh token: %w", err)
 	}
@@ -37,6 +58,9 @@ func (c *Client) Refresh(refreshToken string) (*auth.TokenDetails, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("refreshing access token: %w", err)
+	}
+	if rsp.StatusCode == http.StatusUnauthorized {
+		return nil, auth.ErrUnauthorized
 	}
 	if rsp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(
@@ -50,11 +74,23 @@ func (c *Client) Refresh(refreshToken string) (*auth.TokenDetails, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading token refresh response body: %w", err)
 	}
-	var tokens auth.TokenDetails
-	if err := json.Unmarshal(data, &tokens); err != nil {
+	var refresh auth.RefreshResponse
+	if err := json.Unmarshal(data, &refresh); err != nil {
 		return nil, fmt.Errorf("invalid token refresh payload: %w", err)
 	}
-	return &tokens, nil
+	return &refresh, nil
+}
+
+type refresh struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
+func (r *refresh) marshal() ([]byte, error) {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling refresh token: %w", err)
+	}
+	return data, nil
 }
 
 func (c *Client) Exchange(code string) (*auth.TokenDetails, error) {

@@ -163,14 +163,18 @@ func (ahs *AuthHTTPService) RefreshRoute() pz.Route {
 						},
 					)
 				}
-				return pz.InternalServerError(&logging{
-					Message:   "refreshing access token",
-					ErrorType: fmt.Sprintf("%T", err),
-					Error:     err.Error(),
-				})
+				return pz.HandleError(
+					"refreshing access token",
+					err,
+					&logging{
+						Message:   "refreshing access token",
+						ErrorType: fmt.Sprintf("%T", err),
+						Error:     err.Error(),
+					},
+				)
 			}
 
-			return pz.Ok(pz.JSON(&refresh{accessToken}))
+			return pz.Ok(pz.JSON(&RefreshResponse{accessToken}))
 		},
 	}
 }
@@ -359,6 +363,6 @@ type logging struct {
 	Error     string       `json:"error,omitempty"`
 }
 
-type refresh struct {
+type RefreshResponse struct {
 	AccessToken string `json:"accessToken"`
 }

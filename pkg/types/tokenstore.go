@@ -10,8 +10,8 @@ import (
 
 var (
 	ErrTokenNotFound = &pz.HTTPError{
-		Status:  http.StatusNotFound,
-		Message: "token not found",
+		Status:  http.StatusUnauthorized,
+		Message: "unauthorized",
 	}
 	ErrTokenExists = &pz.HTTPError{
 		Status:  http.StatusConflict,

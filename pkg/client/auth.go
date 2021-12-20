@@ -104,7 +104,7 @@ func (atws *AuthTypeWebServer) validate(
 		if err, ok := err.(*jwt.ValidationError); ok {
 			masked := err.Errors & jwt.ValidationErrorExpired
 			if masked == jwt.ValidationErrorExpired {
-				tokens, err := atws.Client.Refresh(refreshToken)
+				rsp, err := atws.Client.Refresh(refreshToken)
 				if err != nil {
 					return resultErr("refreshing access token", err)
 				}
@@ -113,12 +113,12 @@ func (atws *AuthTypeWebServer) validate(
 				// it's coming directly from the auth service, but we need its
 				// user. If we got here, the previous access token's user
 				// failed to parse because the token was expired.
-				user, err := validateAccessToken(tokens.AccessToken.Token, key)
+				user, err := validateAccessToken(rsp.AccessToken, key)
 				if err != nil {
 					return resultErr("parsing `sub` (user) claim", err)
 				}
 
-				encrypted, err := atws.Encrypt(tokens.AccessToken.Token)
+				encrypted, err := atws.Encrypt(rsp.AccessToken)
 				if err != nil {
 					return resultErr("encrypting access token", err)
 				}

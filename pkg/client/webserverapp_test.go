@@ -19,7 +19,7 @@ func TestAuthCodeCallback(t *testing.T) {
 	jwt.TimeFunc = func() time.Time { return now }
 	defer func() { jwt.TimeFunc = time.Now }()
 
-	authService, err := testAuthService(now)
+	authService, err := testAuthService(nil)
 	if err != nil {
 		t.Fatalf("creating test `auth.AuthService`: %v", err)
 	}

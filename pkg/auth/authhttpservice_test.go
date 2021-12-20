@@ -31,15 +31,15 @@ func TestAuthHTTPService(t *testing.T) {
 		wantedTokens   []types.Token
 	}{
 		{
-			name:  "forgot password",
-			input: `{"user": "user"}`,
-			route: (*AuthHTTPService).ForgotPasswordRoute,
+			name: "forgot password",
 			existingUsers: []types.UserEntry{{
 				User:         "user",
 				Email:        "user@example.org",
 				PasswordHash: hashBcrypt("password"),
 			}},
 			existingTokens: testsupport.TokenStoreFake{},
+			input:          `{"user": "user"}`,
+			route:          (*AuthHTTPService).ForgotPasswordRoute,
 			wantedStatus:   200,
 			wantedPayload:  Any{},
 		},
@@ -47,10 +47,10 @@ func TestAuthHTTPService(t *testing.T) {
 			// Still want to return 200 when user isn't found to avoid leaking
 			// details to potential attackers.
 			name:           "forgot password: user not found",
-			input:          `{"user": "user"}`,
-			route:          (*AuthHTTPService).ForgotPasswordRoute,
 			existingUsers:  nil,
 			existingTokens: testsupport.TokenStoreFake{},
+			input:          `{"user": "user"}`,
+			route:          (*AuthHTTPService).ForgotPasswordRoute,
 			wantedStatus:   200,
 			wantedPayload:  Any{},
 		},
@@ -58,17 +58,17 @@ func TestAuthHTTPService(t *testing.T) {
 			// Expect tokens are returned when a valid refresh token is
 			// provided.
 			name: "refresh",
+			existingTokens: testsupport.TokenStoreFake{
+				refreshToken.Token: refreshToken.Expires,
+			},
 			input: fmt.Sprintf(
 				`{"refreshToken": "%s"}`,
 				refreshToken.Token,
 			),
-			route: (*AuthHTTPService).RefreshRoute,
-			existingTokens: testsupport.TokenStoreFake{
-				refreshToken.Token: refreshToken.Expires,
-			},
+			route:          (*AuthHTTPService).RefreshRoute,
 			validationTime: now.Add(2 * time.Second),
 			wantedStatus:   200,
-			wantedPayload:  &refresh{AccessToken: accessToken.Token},
+			wantedPayload:  &RefreshResponse{AccessToken: accessToken.Token},
 			wantedTokens:   []types.Token{*refreshToken},
 		},
 		{
@@ -77,9 +77,9 @@ func TestAuthHTTPService(t *testing.T) {
 			// nature of the error to avoid leaking information to potential
 			// attackers.
 			name:           "refresh: invalid token",
+			existingTokens: testsupport.TokenStoreFake{},
 			input:          `{"refreshToken": "foobar"}`,
 			route:          (*AuthHTTPService).RefreshRoute,
-			existingTokens: testsupport.TokenStoreFake{},
 			validationTime: now.Add(2 * time.Second),
 			wantedStatus:   401,
 			wantedPayload:  ErrInvalidRefreshToken,
@@ -90,12 +90,29 @@ func TestAuthHTTPService(t *testing.T) {
 			// nature of the error to avoid leaking information to potential
 			// attackers.
 			name:           "refresh: expired token",
-			input:          fmt.Sprintf(`{"refreshToken": "%s"}`, refreshToken),
-			route:          (*AuthHTTPService).RefreshRoute,
 			existingTokens: testsupport.TokenStoreFake{},
+			input: fmt.Sprintf(
+				`{"refreshToken": "%s"}`,
+				refreshToken.Token,
+			),
+			route:          (*AuthHTTPService).RefreshRoute,
 			validationTime: now.Add(30 * 24 * time.Hour),
 			wantedStatus:   401,
 			wantedPayload:  ErrInvalidRefreshToken,
+		},
+		{
+			// Expect ErrTokenNotFound when an unknown refresh token is
+			// provided.
+			name:           "refresh: unknown token",
+			existingTokens: testsupport.TokenStoreFake{},
+			input: fmt.Sprintf(
+				`{"refreshToken": "%s"}`,
+				refreshToken.Token,
+			),
+			route:          (*AuthHTTPService).RefreshRoute,
+			validationTime: now.Add(2 * time.Second),
+			wantedStatus:   401,
+			wantedPayload:  types.ErrTokenNotFound,
 		},
 		{
 			// Expect tokens returned in exchange for a valid auth code.
@@ -115,8 +132,11 @@ func TestAuthHTTPService(t *testing.T) {
 			existingTokens: testsupport.TokenStoreFake{
 				refreshToken.Token: refreshToken.Expires,
 			},
-			route:        (*AuthHTTPService).LogoutRoute,
-			input:        fmt.Sprintf(`{"refreshToken": "%s"}`, refreshToken.Token),
+			route: (*AuthHTTPService).LogoutRoute,
+			input: fmt.Sprintf(
+				`{"refreshToken": "%s"}`,
+				refreshToken.Token,
+			),
 			wantedStatus: 200,
 			wantedPayload: &LogoutResponse{
 				Status:  200,
@@ -329,8 +349,8 @@ func compareTokens(key *ecdsa.PublicKey, wanted, found string) error {
 	return nil
 }
 
-func (wanted *refresh) CompareData(data []byte) error {
-	var found refresh
+func (wanted *RefreshResponse) CompareData(data []byte) error {
+	var found RefreshResponse
 	if err := json.Unmarshal(data, &found); err != nil {
 		return fmt.Errorf("unmarshaling `refresh`: %w", err)
 	}
