@@ -187,8 +187,6 @@ func testAuthService(
 	}, nil
 }
 
-func nowFunc() time.Time { return now }
-
 var (
 	now = time.Date(1988, 8, 3, 0, 0, 0, 0, time.UTC)
 )
