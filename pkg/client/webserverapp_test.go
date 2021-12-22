@@ -88,25 +88,16 @@ func TestAuthCodeCallback(t *testing.T) {
 			wantedLocation:  "",
 		},
 	} {
-		authService, err := testAuthService(&authServiceOptions{
-			authCodeFactory: &authCodeFactory,
-		})
-		if err != nil {
-			t.Fatalf("unexpected error creating test auth service: %v", err)
-		}
-
-		authSrv := testServer(
-			t,
-			(&auth.AuthHTTPService{AuthService: authService}).ExchangeRoute(),
-		)
-
 		app := WebServerApp{
-			Client:          testClient(authSrv),
+			Client:          testClient(testAuthServer(t, &authCodeFactory)),
 			DefaultRedirect: testCase.redirectDefault,
 			Key:             "cookie-encryption-key",
 		}
 
-		appSrv := testServer(t, app.AuthCodeCallbackRoute("/api/auth/code"))
+		var (
+			err    error
+			appSrv = testServer(t, app.AuthCodeCallbackRoute("/api/auth/code"))
+		)
 		app.BaseURL, err = url.Parse(appSrv.URL)
 		if err != nil {
 			t.Fatalf("unexpected error parsing webserver app url: %v", err)
@@ -170,6 +161,23 @@ func TestAuthCodeCallback(t *testing.T) {
 			t.Fatal("didn't want tokens, but at least one is set")
 		}
 	}
+}
+
+func testAuthServer(
+	t *testing.T,
+	authCodeFactory *auth.TokenFactory,
+) *httptest.Server {
+	authService, err := testAuthService(&authServiceOptions{
+		authCodeFactory: authCodeFactory,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error creating test auth service: %v", err)
+	}
+
+	return testServer(
+		t,
+		(&auth.AuthHTTPService{AuthService: authService}).ExchangeRoute(),
+	)
 }
 
 func testServer(t *testing.T, routes ...pz.Route) *httptest.Server {

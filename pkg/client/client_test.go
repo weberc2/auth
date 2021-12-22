@@ -31,7 +31,10 @@ func TestClient_Logout(t *testing.T) {
 					bcrypt.DefaultCost,
 				)
 				if err != nil {
-					t.Fatalf("unexpected error bcrypt-hashing password: %v", err)
+					t.Fatalf(
+						"unexpected error bcrypt-hashing password: %v",
+						err,
+					)
 				}
 				return hash
 			}(),
@@ -131,7 +134,7 @@ func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
 			options.userStore = testsupport.UserStoreFake{}
 		}
 		if options.authCodeFactory == nil {
-			options.authCodeFactory = &authCodeFactory
+			options.authCodeFactory = defaultAuthCodeFactory()
 		}
 	}
 	accessKey, err := p521Key()
@@ -177,10 +180,19 @@ type authServiceOptions struct {
 	authCodeFactory *auth.TokenFactory
 }
 
+func defaultAuthCodeFactory() *auth.TokenFactory {
+	return &auth.TokenFactory{
+		Issuer:        "issuer",
+		Audience:      "audience",
+		TokenValidity: time.Minute,
+		SigningKey:    mustP521Key(),
+	}
+}
+
 func defaultAuthServiceOptions() *authServiceOptions {
 	return &authServiceOptions{
 		userStore:       testsupport.UserStoreFake{},
-		authCodeFactory: &authCodeFactory,
+		authCodeFactory: defaultAuthCodeFactory(),
 	}
 }
 
@@ -196,15 +208,4 @@ func mustP521Key() *ecdsa.PrivateKey {
 	return key
 }
 
-var (
-	now             = time.Date(1988, 8, 3, 0, 0, 0, 0, time.UTC)
-	issuer          = "issuer"
-	audience        = "audience"
-	authCodeKey     = mustP521Key()
-	authCodeFactory = auth.TokenFactory{
-		Issuer:        issuer,
-		Audience:      audience,
-		TokenValidity: time.Minute,
-		SigningKey:    authCodeKey,
-	}
-)
+var now = time.Date(1988, 8, 3, 0, 0, 0, 0, time.UTC)
