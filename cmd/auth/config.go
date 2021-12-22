@@ -29,18 +29,18 @@ const (
 )
 
 type Config struct {
-	Addr                    string     `envconfig:"AUTH_ADDR" default:"127.0.0.1:8080" yaml:"addr"`
-	HostName                string     `envconfig:"AUTH_HOST_NAME" yaml:"hostName"`
-	Issuer                  string     `envconfig:"AUTH_ISSUER" yaml:"issuer"`
-	Audience                string     `envconfig:"AUTH_AUDIENCE" yaml:"audience"`
-	CodeSigningKey          PrivateKey `envconfig:"AUTH_CODE_SIGNING_KEY" yaml:"codeSigningKey"`
-	AccessSigningKey        PrivateKey `envconfig:"AUTH_ACCESS_SIGNING_KEY" yaml:"accessSigningKey"`
-	RefreshSigningKey       PrivateKey `envconfig:"AUTH_REFRESH_SIGNING_KEY" yaml:"refreshSigningKey"`
-	ResetSigningKey         PrivateKey `envconfig:"AUTH_RESET_SIGNING_KEY" yaml:"resetSigningKey"`
-	NotificationSender      string     `envconfig:"AUTH_NOTIFICATION_SENDER" yaml:"notificationSender"`
-	DefaultRedirectLocation string     `envconfig:"AUTH_DEFAULT_REDIRECT_LOCATION" yaml:"defaultRedirectLocation"`
-	RedirectDomain          string     `envconfig:"AUTH_REDIRECT_DOMAIN" yaml:"redirectDomain"`
-	BaseURL                 BaseURL    `envconfig:"AUTH_BASE_URL" yaml:"baseURL"`
+	Addr                    string     `envconfig:"AUTH_ADDR"                      default:"127.0.0.1:8080" yaml:"addr"`
+	HostName                string     `envconfig:"AUTH_HOST_NAME"                                          yaml:"hostName"`
+	Issuer                  string     `envconfig:"AUTH_ISSUER"                                             yaml:"issuer"`
+	Audience                string     `envconfig:"AUTH_AUDIENCE"                                           yaml:"audience"`
+	CodeSigningKey          PrivateKey `envconfig:"AUTH_CODE_SIGNING_KEY"                                   yaml:"codeSigningKey"`
+	AccessSigningKey        PrivateKey `envconfig:"AUTH_ACCESS_SIGNING_KEY"                                 yaml:"accessSigningKey"`
+	RefreshSigningKey       PrivateKey `envconfig:"AUTH_REFRESH_SIGNING_KEY"                                yaml:"refreshSigningKey"`
+	ResetSigningKey         PrivateKey `envconfig:"AUTH_RESET_SIGNING_KEY"                                  yaml:"resetSigningKey"`
+	NotificationSender      string     `envconfig:"AUTH_NOTIFICATION_SENDER"                                yaml:"notificationSender"`
+	DefaultRedirectLocation string     `envconfig:"AUTH_DEFAULT_REDIRECT_LOCATION"                          yaml:"defaultRedirectLocation"`
+	RedirectDomain          string     `envconfig:"AUTH_REDIRECT_DOMAIN"                                    yaml:"redirectDomain"`
+	BaseURL                 BaseURL    `envconfig:"AUTH_BASE_URL"                                           yaml:"baseURL"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -149,7 +149,11 @@ func (c *Config) Run() error {
 				Client: ses.New(sess),
 				Sender: c.NotificationSender,
 				TokenURL: func(tok string) string {
-					return fmt.Sprintf("https://%s/password?t=%s", c.HostName, tok)
+					return fmt.Sprintf(
+						"https://%s/password?t=%s",
+						c.HostName,
+						tok,
+					)
 				},
 				RegistrationSettings:   auth.DefaultRegistrationSettings,
 				ForgotPasswordSettings: auth.DefaultForgotPasswordSettings,
@@ -261,7 +265,8 @@ func (pk *PrivateKey) Decode(value string) error {
 		// Ideally we would just match on PRIVATE KEY, but Terraform's
 		// tls_private_key[0] module uses "EC PRIVATE KEY" 🤦
 		//
-		// [0]: https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key#attributes-reference
+		// [0]:
+		// https://registry.terraform.io/providers/hashicorp/tls/latest/docs/resources/private_key#attributes-reference
 		if !strings.Contains(block.Type, "PRIVATE KEY") {
 			if len(rest) > 0 {
 				data = rest

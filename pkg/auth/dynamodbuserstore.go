@@ -41,7 +41,9 @@ func (ddbus *DynamoDBUserStore) Upsert(entry *types.UserEntry) error {
 	return nil
 }
 
-func (ddbus *DynamoDBUserStore) Get(user types.UserID) (*types.UserEntry, error) {
+func (ddbus *DynamoDBUserStore) Get(
+	user types.UserID,
+) (*types.UserEntry, error) {
 	rsp, err := ddbus.Client.GetItem(&dynamodb.GetItemInput{
 		TableName: aws.String(ddbus.Table),
 		Key: map[string]*dynamodb.AttributeValue{
@@ -58,7 +60,9 @@ func (ddbus *DynamoDBUserStore) Get(user types.UserID) (*types.UserEntry, error)
 	return attributesToUser(rsp.Item), nil
 }
 
-func userToAttributes(entry *types.UserEntry) map[string]*dynamodb.AttributeValue {
+func userToAttributes(
+	entry *types.UserEntry,
+) map[string]*dynamodb.AttributeValue {
 	return map[string]*dynamodb.AttributeValue{
 		"User":  {S: aws.String(string(entry.User))},
 		"Email": {S: aws.String(entry.Email)},
@@ -70,7 +74,9 @@ func userToAttributes(entry *types.UserEntry) map[string]*dynamodb.AttributeValu
 	}
 }
 
-func attributesToUser(attrs map[string]*dynamodb.AttributeValue) *types.UserEntry {
+func attributesToUser(
+	attrs map[string]*dynamodb.AttributeValue,
+) *types.UserEntry {
 	user := types.UserID(*attrs["User"].S)
 	email := *attrs["Email"].S
 	data, err := base64.RawStdEncoding.DecodeString(*attrs["PasswordHash"].S)

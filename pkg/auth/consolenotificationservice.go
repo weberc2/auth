@@ -10,7 +10,10 @@ import (
 
 type ConsoleNotificationService struct{}
 
-func (cns ConsoleNotificationService) Notify(u types.UserID, t uuid.UUID) error {
+func (cns ConsoleNotificationService) Notify(
+	u types.UserID,
+	t uuid.UUID,
+) error {
 	data, err := json.Marshal(struct {
 		User  types.UserID `json:"user"`
 		Token string       `json:"token"`

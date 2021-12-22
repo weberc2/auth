@@ -30,9 +30,11 @@ Someone has attempted to register an account with this email address. If this wa
 
 	DefaultForgotPasswordSettings = NotificationSettings{
 		Subject: "Forgot password",
-		HTMLTemplate: html.Must(html.New("").Parse(`<p>Hello {{ .User }},<br /><br />
+		HTMLTemplate: html.Must(
+			html.New("").Parse(`<p>Hello {{ .User }},<br /><br />
 
-Someone has attempted to reset your password. If this was not you, please disregard this message. If this was intentional, please click this <a href="{{ .TokenURL }}">link</a> to reset your password.</p>`)),
+Someone has attempted to reset your password. If this was not you, please disregard this message. If this was intentional, please click this <a href="{{ .TokenURL }}">link</a> to reset your password.</p>`),
+		),
 		TextTemplate: text.Must(text.New("").Parse(`Hello {{ .User }},
 Someone has attempted to reset your password. If this was not you, please disregard this message. If this was intentional, please enter the following URL into your web browser to reset your password: {{ .TokenURL }}`)),
 	}

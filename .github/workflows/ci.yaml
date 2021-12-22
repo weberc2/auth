@@ -43,6 +43,16 @@ jobs:
         with:
           go-version: 1.17.3
 
+      - name: Fmt
+        id: fmt
+        run: |
+            go install github.com/segmentio/golines@v0.7.0
+            output="$(golines -m 80 --shorten-comments --dry-run)"
+            if [[ -n "$output" ]]; then
+                echo "$output"
+                exit 1
+            fi
+
       - name: Lint
         id: lint
         run: |

@@ -142,7 +142,10 @@ func TestLogin(t *testing.T) {
 
 }
 
-func parseToken(token string, key *ecdsa.PrivateKey) (*jwt.StandardClaims, error) {
+func parseToken(
+	token string,
+	key *ecdsa.PrivateKey,
+) (*jwt.StandardClaims, error) {
 	tok, err := jwt.ParseWithClaims(
 		token,
 		&jwt.StandardClaims{},
@@ -283,7 +286,10 @@ func TestForgotPassword(t *testing.T) {
 			Users: &userStoreMock{
 				get: func(u types.UserID) (*types.UserEntry, error) {
 					getCalledWithUser = u
-					return &types.UserEntry{User: u, Email: "user@example.org"}, nil
+					return &types.UserEntry{
+						User:  u,
+						Email: "user@example.org",
+					}, nil
 				},
 			},
 		},
@@ -426,7 +432,10 @@ func TestLogout(t *testing.T) {
 }
 
 func hashBcrypt(password string) []byte {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(password),
+		bcrypt.DefaultCost,
+	)
 	if err != nil {
 		panic(fmt.Sprintf("bcrypt-hashing password '%s': %v", password, err))
 	}
