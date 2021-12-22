@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -38,7 +37,7 @@ func TestClient_Logout(t *testing.T) {
 			}(),
 		},
 	}
-	authService, err := testAuthService(users)
+	authService, err := testAuthService(&authServiceOptions{userStore: users})
 	if err != nil {
 		t.Fatalf("creating test `auth.AuthService`: %v", err)
 	}
@@ -121,31 +120,28 @@ func TestClient_Exchange(t *testing.T) {
 }
 
 func testClient(srv *httptest.Server) Client {
-	httpClient := srv.Client()
-	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	return Client{HTTP: *httpClient, BaseURL: srv.URL}
+	return Client{HTTP: *testHTTPClient(srv), BaseURL: srv.URL}
 }
 
-func testAuthService(
-	users testsupport.UserStoreFake,
-) (auth.AuthService, error) {
-	authCodeKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	if err != nil {
-		return auth.AuthService{}, fmt.Errorf(
-			"unexpected error generating auth code key: %w",
-			err,
-		)
+func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
+	if options == nil {
+		options = defaultAuthServiceOptions()
+	} else {
+		if options.userStore == nil {
+			options.userStore = testsupport.UserStoreFake{}
+		}
+		if options.authCodeFactory == nil {
+			options.authCodeFactory = &authCodeFactory
+		}
 	}
-	accessKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	accessKey, err := p521Key()
 	if err != nil {
 		return auth.AuthService{}, fmt.Errorf(
 			"unexpected error generating access key: %w",
 			err,
 		)
 	}
-	refreshKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	refreshKey, err := p521Key()
 	if err != nil {
 		return auth.AuthService{}, fmt.Errorf(
 			"unexpected error generating refresh key: %w",
@@ -153,22 +149,11 @@ func testAuthService(
 		)
 	}
 
-	codes := auth.TokenFactory{
-		Issuer:        "issuer",
-		Audience:      "audience",
-		TokenValidity: time.Minute,
-		SigningKey:    authCodeKey,
-	}
-
-	if users == nil {
-		users = testsupport.UserStoreFake{}
-	}
-
 	return auth.AuthService{
 		Tokens:        testsupport.TokenStoreFake{},
-		Creds:         auth.CredStore{Users: users},
+		Creds:         auth.CredStore{Users: options.userStore},
 		Notifications: testsupport.NotificationServiceFake{},
-		Codes:         codes,
+		Codes:         *options.authCodeFactory,
 		TokenDetails: auth.TokenDetailsFactory{
 			AccessTokens: auth.TokenFactory{
 				Issuer:        "issuer",
@@ -187,6 +172,39 @@ func testAuthService(
 	}, nil
 }
 
+type authServiceOptions struct {
+	userStore       testsupport.UserStoreFake
+	authCodeFactory *auth.TokenFactory
+}
+
+func defaultAuthServiceOptions() *authServiceOptions {
+	return &authServiceOptions{
+		userStore:       testsupport.UserStoreFake{},
+		authCodeFactory: &authCodeFactory,
+	}
+}
+
+func p521Key() (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+}
+
+func mustP521Key() *ecdsa.PrivateKey {
+	key, err := p521Key()
+	if err != nil {
+		panic(fmt.Sprintf("generating ECDSA key: %v", err))
+	}
+	return key
+}
+
 var (
-	now = time.Date(1988, 8, 3, 0, 0, 0, 0, time.UTC)
+	now             = time.Date(1988, 8, 3, 0, 0, 0, 0, time.UTC)
+	issuer          = "issuer"
+	audience        = "audience"
+	authCodeKey     = mustP521Key()
+	authCodeFactory = auth.TokenFactory{
+		Issuer:        issuer,
+		Audience:      audience,
+		TokenValidity: time.Minute,
+		SigningKey:    authCodeKey,
+	}
 )
