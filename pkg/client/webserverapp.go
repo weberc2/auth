@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	pz "github.com/weberc2/httpeasy"
 )
@@ -99,11 +100,17 @@ func (app *WebServerApp) LogoutRoute(path string) pz.Route {
 			cookieDomain := app.BaseURL.Host[:portStart]
 			context.Message = "successfully logged out"
 			return pz.SeeOther(context.Redirect, &context).WithCookies(
-				cookie("Access-Token", cookieDomain, ""),
-				cookie("Refresh-Token", cookieDomain, ""),
+				expireCookie(cookie("Access-Token", cookieDomain, "")),
+				expireCookie(cookie("Refresh-Token", cookieDomain, "")),
 			)
 		},
 	}
+}
+
+func expireCookie(c *http.Cookie) *http.Cookie {
+	c.MaxAge = -1
+	c.Expires = time.Unix(0, 0)
+	return c
 }
 
 func (app *WebServerApp) AuthCodeCallbackRoute(path string) pz.Route {
@@ -143,6 +150,13 @@ func decrypt(input, key string) (string, error) {
 	}
 
 	nsz := gcm.NonceSize()
+	if len(encrypted) < nsz {
+		return "", fmt.Errorf(
+			"encrypted data is smaller than the nonce (%d vs %d respectively)",
+			len(encrypted),
+			nsz,
+		)
+	}
 	data, err := gcm.Open(nil, encrypted[:nsz], encrypted[nsz:], nil)
 	return string(data), err
 }

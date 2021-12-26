@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/weberc2/auth/pkg/auth"
+	"github.com/weberc2/auth/pkg/pgtokenstore"
 	pz "github.com/weberc2/httpeasy"
 	"gopkg.in/yaml.v2"
 )
@@ -127,8 +128,13 @@ func (c *Config) Run() error {
 	if err != nil {
 		return fmt.Errorf("creating AWS session: %w", err)
 	}
+	tokenStore, err := pgtokenstore.OpenEnv()
+	if err != nil {
+		return fmt.Errorf("opening token store database connection: %w", err)
+	}
 	authService := auth.AuthHTTPService{
 		AuthService: auth.AuthService{
+			Tokens: tokenStore,
 			Creds: auth.CredStore{Users: &auth.DynamoDBUserStore{
 				Client: dynamodb.New(sess),
 				Table:  "Users",
