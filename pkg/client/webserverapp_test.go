@@ -22,7 +22,7 @@ func TestWebServerApp_Logout(t *testing.T) {
 		name            string
 		tokenStore      testsupport.TokenStoreFake
 		redirectDefault string
-		params          map[string]string
+		referer         string
 		cookies         map[string]string
 		wantedStatus    int
 		wantedLocation  string
@@ -32,7 +32,6 @@ func TestWebServerApp_Logout(t *testing.T) {
 			name:            "simple",
 			tokenStore:      testsupport.TokenStoreFake{"refresh-token": now},
 			redirectDefault: "default",
-			params:          map[string]string{},
 			cookies: map[string]string{
 				"Refresh-Token": "refresh-token",
 			},
@@ -46,7 +45,6 @@ func TestWebServerApp_Logout(t *testing.T) {
 			name:            "token cookie not found",
 			tokenStore:      testsupport.TokenStoreFake{},
 			redirectDefault: "default",
-			params:          map[string]string{},
 			cookies:         map[string]string{},
 			wantedStatus:    http.StatusSeeOther,
 			wantedLocation:  "default",
@@ -58,7 +56,6 @@ func TestWebServerApp_Logout(t *testing.T) {
 			name:            "token not found",
 			tokenStore:      testsupport.TokenStoreFake{},
 			redirectDefault: "default",
-			params:          map[string]string{},
 			cookies: map[string]string{
 				"Refresh-Token": "refresh-token",
 			},
@@ -70,7 +67,7 @@ func TestWebServerApp_Logout(t *testing.T) {
 			name:            "redirect",
 			tokenStore:      testsupport.TokenStoreFake{"redirect-token": now},
 			redirectDefault: "default",
-			params:          map[string]string{"redirect": "redirect"},
+			referer:         "redirect",
 			cookies: map[string]string{
 				"Refresh-Token": "refresh-token",
 			},
@@ -100,21 +97,17 @@ func TestWebServerApp_Logout(t *testing.T) {
 			}
 			appClient := testHTTPClient(appSrv)
 
-			values := url.Values{}
-			for key, value := range testCase.params {
-				values.Add(key, value)
-			}
-
-			url := fmt.Sprintf(
-				"%s/auth/logout?%s",
-				appSrv.URL,
-				values.Encode(),
-			)
+			url := fmt.Sprintf("%s/auth/logout", appSrv.URL)
 			t.Logf("GET %s", url)
 
 			req, err := http.NewRequest("GET", url, strings.NewReader(""))
 			if err != nil {
 				t.Fatalf("unexpected error building request: %v", err)
+			}
+			if testCase.referer != "" {
+				referer := fmt.Sprintf("%s/%s", appSrv.URL, testCase.referer)
+				t.Logf("Adding `Referer` header: %s", referer)
+				req.Header.Add("Referer", referer)
 			}
 
 			cookieDomain := join(app.BaseURL, "auth/logout")
