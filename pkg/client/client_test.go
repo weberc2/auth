@@ -136,6 +136,9 @@ func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
 		if options.authCodeFactory == nil {
 			options.authCodeFactory = defaultAuthCodeFactory()
 		}
+		if options.tokenStore == nil {
+			options.tokenStore = testsupport.TokenStoreFake{}
+		}
 	}
 	accessKey, err := p521Key()
 	if err != nil {
@@ -153,7 +156,7 @@ func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
 	}
 
 	return auth.AuthService{
-		Tokens:        testsupport.TokenStoreFake{},
+		Tokens:        options.tokenStore,
 		Creds:         auth.CredStore{Users: options.userStore},
 		Notifications: testsupport.NotificationServiceFake{},
 		Codes:         *options.authCodeFactory,
@@ -178,6 +181,7 @@ func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
 type authServiceOptions struct {
 	userStore       testsupport.UserStoreFake
 	authCodeFactory *auth.TokenFactory
+	tokenStore      testsupport.TokenStoreFake
 }
 
 func defaultAuthCodeFactory() *auth.TokenFactory {
@@ -193,6 +197,7 @@ func defaultAuthServiceOptions() *authServiceOptions {
 	return &authServiceOptions{
 		userStore:       testsupport.UserStoreFake{},
 		authCodeFactory: defaultAuthCodeFactory(),
+		tokenStore:      testsupport.TokenStoreFake{},
 	}
 }
 

@@ -5,17 +5,183 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/weberc2/auth/pkg/auth"
+	"github.com/weberc2/auth/pkg/testsupport"
 	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
 	pztest "github.com/weberc2/httpeasy/testsupport"
 )
 
-func TestAuthCodeCallback(t *testing.T) {
+func TestWebServerApp_Logout(t *testing.T) {
+	for _, testCase := range []struct {
+		name            string
+		tokenStore      testsupport.TokenStoreFake
+		redirectDefault string
+		params          map[string]string
+		cookies         map[string]string
+		wantedStatus    int
+		wantedLocation  string
+		wantedTokens    bool
+	}{
+		{
+			name:            "simple",
+			tokenStore:      testsupport.TokenStoreFake{"refresh-token": now},
+			redirectDefault: "default",
+			params:          map[string]string{},
+			cookies: map[string]string{
+				"Refresh-Token": "refresh-token",
+			},
+			wantedStatus:   http.StatusSeeOther,
+			wantedLocation: "default",
+			wantedTokens:   false,
+		},
+		{
+			// If there's no token cookie, then there's nothing to do, so just
+			// redirect.
+			name:            "token cookie not found",
+			tokenStore:      testsupport.TokenStoreFake{},
+			redirectDefault: "default",
+			params:          map[string]string{},
+			cookies:         map[string]string{},
+			wantedStatus:    http.StatusSeeOther,
+			wantedLocation:  "default",
+			wantedTokens:    false,
+		},
+		{
+			// If the provided token isn't found in the token store, then
+			// there's nothing to do, so unset the token cookie and redirect.
+			name:            "token not found",
+			tokenStore:      testsupport.TokenStoreFake{},
+			redirectDefault: "default",
+			params:          map[string]string{},
+			cookies: map[string]string{
+				"Refresh-Token": "refresh-token",
+			},
+			wantedStatus:   http.StatusSeeOther,
+			wantedLocation: "default",
+			wantedTokens:   false,
+		},
+		{
+			name:            "redirect",
+			tokenStore:      testsupport.TokenStoreFake{"redirect-token": now},
+			redirectDefault: "default",
+			params:          map[string]string{"redirect": "redirect"},
+			cookies: map[string]string{
+				"Refresh-Token": "refresh-token",
+			},
+			wantedStatus:   http.StatusSeeOther,
+			wantedLocation: "redirect",
+			wantedTokens:   false,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			app := WebServerApp{
+				Client: testClient(testAuthServer(
+					t,
+					&authServiceOptions{
+						tokenStore: testCase.tokenStore,
+					},
+				)),
+				DefaultRedirect: testCase.redirectDefault,
+				Key:             "cookie-encryption-key",
+			}
+			var (
+				err    error
+				appSrv = testServer(t, app.LogoutRoute("/auth/logout"))
+			)
+			app.BaseURL, err = url.Parse(appSrv.URL)
+			if err != nil {
+				t.Fatalf("unexpected error parsing webserver app url: %v", err)
+			}
+			appClient := testHTTPClient(appSrv)
+
+			values := url.Values{}
+			for key, value := range testCase.params {
+				values.Add(key, value)
+			}
+
+			url := fmt.Sprintf(
+				"%s/auth/logout?%s",
+				appSrv.URL,
+				values.Encode(),
+			)
+			t.Logf("GET %s", url)
+
+			req, err := http.NewRequest("GET", url, strings.NewReader(""))
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			cookieDomain := join(app.BaseURL, "auth/logout")
+			for cookieName, cookieValue := range testCase.cookies {
+				req.AddCookie(cookie(cookieName, cookieDomain, cookieValue))
+			}
+
+			rsp, err := appClient.Do(req)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error communicating with app server: %v",
+					err,
+				)
+			}
+
+			if rsp.StatusCode != testCase.wantedStatus {
+				t.Fatalf(
+					"Response.StatusCode: wanted `%d`; found `%d`",
+					testCase.wantedStatus,
+					rsp.StatusCode,
+				)
+			}
+
+			var wanted string
+			if testCase.wantedLocation != "" {
+				wanted = fmt.Sprintf(
+					"%s/%s",
+					appSrv.URL,
+					testCase.wantedLocation,
+				)
+			}
+			found := rsp.Header.Get("Location")
+			if wanted != found {
+				t.Fatalf(
+					"Response.Header[\"Location\"]: wanted `%s`; found `%s`",
+					wanted,
+					found,
+				)
+			}
+
+			cookies := rsp.Cookies()
+			var accessToken, refreshToken string
+			for _, cookie := range cookies {
+				if cookie.Name == "Access-Token" {
+					accessToken = cookie.Value
+				} else if cookie.Name == "Refresh-Token" {
+					refreshToken = cookie.Value
+				}
+			}
+
+			if testCase.wantedTokens &&
+				(accessToken == "" || refreshToken == "") {
+				t.Logf("Access-Token: %s", accessToken)
+				t.Logf("Refresh-Token: %s", refreshToken)
+				t.Fatal("wanted tokens, but at least one is empty")
+			}
+			if !testCase.wantedTokens &&
+				(accessToken != "" || refreshToken != "") {
+				t.Logf("Access-Token: %s", accessToken)
+				t.Logf("Refresh-Token: %s", refreshToken)
+				t.Fatal("didn't want tokens, but at least one is set")
+			}
+		})
+	}
+}
+
+func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 	var (
 		now             = time.Date(2000, 9, 15, 0, 0, 0, 0, time.UTC)
 		issuer          = "issuer"
@@ -88,95 +254,118 @@ func TestAuthCodeCallback(t *testing.T) {
 			wantedLocation:  "",
 		},
 	} {
-		app := WebServerApp{
-			Client:          testClient(testAuthServer(t, &authCodeFactory)),
-			DefaultRedirect: testCase.redirectDefault,
-			Key:             "cookie-encryption-key",
-		}
-
-		var (
-			err    error
-			appSrv = testServer(t, app.AuthCodeCallbackRoute("/api/auth/code"))
-		)
-		app.BaseURL, err = url.Parse(appSrv.URL)
-		if err != nil {
-			t.Fatalf("unexpected error parsing webserver app url: %v", err)
-		}
-
-		appClient := testHTTPClient(appSrv)
-
-		values := url.Values{}
-		for key, value := range testCase.params {
-			values.Add(key, value)
-		}
-
-		url := fmt.Sprintf("%s/api/auth/code?%s", appSrv.URL, values.Encode())
-		t.Logf("GET %s", url)
-
-		rsp, err := appClient.Get(url)
-		if err != nil {
-			t.Fatalf("unexpected error communicating with app server: %v", err)
-		}
-
-		if rsp.StatusCode != testCase.wantedStatus {
-			t.Fatalf(
-				"Response.StatusCode: wanted `%d`; found `%d`",
-				testCase.wantedStatus,
-				rsp.StatusCode,
-			)
-		}
-
-		var wanted string
-		if testCase.wantedLocation != "" {
-			wanted = fmt.Sprintf("%s/%s", appSrv.URL, testCase.wantedLocation)
-		}
-		found := rsp.Header.Get("Location")
-		if wanted != found {
-			t.Fatalf(
-				"Response.Header[\"Location\"]: wanted `%s`; found `%s`",
-				wanted,
-				found,
-			)
-		}
-
-		cookies := rsp.Cookies()
-		var accessToken, refreshToken string
-		for _, cookie := range cookies {
-			if cookie.Name == "Access-Token" {
-				accessToken = cookie.Value
-			} else if cookie.Name == "Refresh-Token" {
-				refreshToken = cookie.Value
+		t.Run(testCase.name, func(t *testing.T) {
+			app := WebServerApp{
+				Client: testClient(testAuthServer(
+					t,
+					&authServiceOptions{
+						authCodeFactory: &authCodeFactory,
+					},
+				)),
+				DefaultRedirect: testCase.redirectDefault,
+				Key:             "cookie-encryption-key",
 			}
-		}
 
-		if testCase.wantedTokens && (accessToken == "" || refreshToken == "") {
-			t.Logf("Access-Token: %s", accessToken)
-			t.Logf("Refresh-Token: %s", refreshToken)
-			t.Fatal("wanted tokens, but at least one is empty")
-		}
-		if !testCase.wantedTokens &&
-			(accessToken != "" || refreshToken != "") {
-			t.Logf("Access-Token: %s", accessToken)
-			t.Logf("Refresh-Token: %s", refreshToken)
-			t.Fatal("didn't want tokens, but at least one is set")
-		}
+			var (
+				err    error
+				appSrv = testServer(
+					t,
+					app.AuthCodeCallbackRoute("/api/auth/code"),
+				)
+			)
+			app.BaseURL, err = url.Parse(appSrv.URL)
+			if err != nil {
+				t.Fatalf("unexpected error parsing webserver app url: %v", err)
+			}
+
+			appClient := testHTTPClient(appSrv)
+
+			values := url.Values{}
+			for key, value := range testCase.params {
+				values.Add(key, value)
+			}
+
+			url := fmt.Sprintf(
+				"%s/api/auth/code?%s",
+				appSrv.URL,
+				values.Encode(),
+			)
+			t.Logf("GET %s", url)
+
+			rsp, err := appClient.Get(url)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error communicating with app server: %v",
+					err,
+				)
+			}
+
+			if rsp.StatusCode != testCase.wantedStatus {
+				t.Fatalf(
+					"Response.StatusCode: wanted `%d`; found `%d`",
+					testCase.wantedStatus,
+					rsp.StatusCode,
+				)
+			}
+
+			var wanted string
+			if testCase.wantedLocation != "" {
+				wanted = fmt.Sprintf(
+					"%s/%s",
+					appSrv.URL,
+					testCase.wantedLocation,
+				)
+			}
+			found := rsp.Header.Get("Location")
+			if wanted != found {
+				t.Fatalf(
+					"Response.Header[\"Location\"]: wanted `%s`; found `%s`",
+					wanted,
+					found,
+				)
+			}
+
+			cookies := rsp.Cookies()
+			var accessToken, refreshToken string
+			for _, cookie := range cookies {
+				if cookie.Name == "Access-Token" {
+					accessToken = cookie.Value
+				} else if cookie.Name == "Refresh-Token" {
+					refreshToken = cookie.Value
+				}
+			}
+
+			if testCase.wantedTokens &&
+				(accessToken == "" || refreshToken == "") {
+				t.Logf("Access-Token: %s", accessToken)
+				t.Logf("Refresh-Token: %s", refreshToken)
+				t.Fatal("wanted tokens, but at least one is empty")
+			}
+			if !testCase.wantedTokens &&
+				(accessToken != "" || refreshToken != "") {
+				t.Logf("Access-Token: %s", accessToken)
+				t.Logf("Refresh-Token: %s", refreshToken)
+				t.Fatal("didn't want tokens, but at least one is set")
+			}
+		})
 	}
 }
 
 func testAuthServer(
 	t *testing.T,
-	authCodeFactory *auth.TokenFactory,
+	options *authServiceOptions,
 ) *httptest.Server {
-	authService, err := testAuthService(&authServiceOptions{
-		authCodeFactory: authCodeFactory,
-	})
+	authService, err := testAuthService(options)
 	if err != nil {
 		t.Fatalf("unexpected error creating test auth service: %v", err)
 	}
 
+	authHTTPService := auth.AuthHTTPService{AuthService: authService}
+
 	return testServer(
 		t,
-		(&auth.AuthHTTPService{AuthService: authService}).ExchangeRoute(),
+		authHTTPService.ExchangeRoute(),
+		authHTTPService.LogoutRoute(),
 	)
 }
 
