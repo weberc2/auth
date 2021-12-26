@@ -75,7 +75,7 @@ func (app *WebServerApp) LogoutRoute(path string) pz.Route {
 				context.RedirectParseError = err.Error()
 				context.Redirect = join(app.BaseURL, app.DefaultRedirect)
 			} else {
-				context.Redirect = join(app.BaseURL, context.RedirectSpecified)
+				context.Redirect = context.RedirectSpecified
 			}
 
 			refreshCookie, err := r.Cookie("Refresh-Token")
