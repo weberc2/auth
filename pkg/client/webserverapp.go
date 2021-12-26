@@ -69,9 +69,7 @@ func (app *WebServerApp) LogoutRoute(path string) pz.Route {
 				Error              string `json:"error,omitempty"`
 			}
 
-			context := logging{
-				RedirectSpecified: r.URL.Query().Get("redirect"),
-			}
+			context := logging{RedirectSpecified: r.Headers.Get("Referer")}
 
 			if err := validateURL(context.RedirectSpecified); err != nil {
 				context.RedirectParseError = err.Error()
