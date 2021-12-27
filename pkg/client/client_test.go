@@ -84,41 +84,67 @@ func TestClient_Logout(t *testing.T) {
 }
 
 func TestClient_Exchange(t *testing.T) {
-	jwt.TimeFunc = func() time.Time { return now }
-	defer func() { jwt.TimeFunc = time.Now }()
+	for _, testCase := range []struct {
+		name         string
+		tokenCreated time.Time
+		wantedErr    types.WantedError
+		wantedTokens bool
+	}{
+		{
+			name:         "simple",
+			tokenCreated: now,
+			wantedTokens: true,
+		},
+		{
+			name:         "unauthorized",
+			tokenCreated: now.Add(-24 * 30 * time.Hour),
+			wantedErr:    auth.ErrUnauthorized,
+			wantedTokens: false,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			jwt.TimeFunc = func() time.Time { return now }
+			defer func() { jwt.TimeFunc = time.Now }()
 
-	authService, err := testAuthService(nil)
-	if err != nil {
-		t.Fatalf("creating test `auth.AuthService`: %v", err)
-	}
+			authService, err := testAuthService(nil)
+			if err != nil {
+				t.Fatalf("creating test `auth.AuthService`: %v", err)
+			}
 
-	api := auth.AuthHTTPService{AuthService: authService}
-	srv := httptest.NewServer(pz.Register(
-		pztest.TestLog(t),
-		api.ExchangeRoute(),
-	))
-	defer srv.Close()
+			api := auth.AuthHTTPService{AuthService: authService}
+			srv := httptest.NewServer(pz.Register(
+				pztest.TestLog(t),
+				api.ExchangeRoute(),
+			))
+			defer srv.Close()
 
-	t.Logf("URL: %s", srv.URL)
+			t.Logf("URL: %s", srv.URL)
 
-	client := testClient(srv)
+			client := testClient(srv)
 
-	code, err := authService.Codes.Create(now, "adam")
-	if err != nil {
-		t.Fatalf("unexpected error creating auth code: %v", err)
-	}
+			code, err := authService.Codes.Create(
+				testCase.tokenCreated,
+				"adam",
+			)
+			if err != nil {
+				t.Fatalf("unexpected error creating auth code: %v", err)
+			}
 
-	tokens, err := client.Exchange(code.Token)
-	if err != nil {
-		t.Fatalf("unexpected error exchanging auth code: %v", err)
-	}
+			if testCase.wantedErr == nil {
+				testCase.wantedErr = types.NilError{}
+			}
+			tokens, err := client.Exchange(code.Token)
+			if err := testCase.wantedErr.CompareErr(err); err != nil {
+				t.Fatal(err)
+			}
 
-	if tokens.AccessToken.Token == "" {
-		t.Fatal("missing access token")
-	}
-
-	if tokens.RefreshToken.Token == "" {
-		t.Fatal("missing refresh token")
+			if testCase.wantedTokens && tokens == nil {
+				t.Fatal("wanted tokens, but found none")
+			}
+			if !testCase.wantedTokens && tokens != nil {
+				t.Fatal("didn't want tokens, but found tokens")
+			}
+		})
 	}
 }
 

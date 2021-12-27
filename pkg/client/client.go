@@ -108,6 +108,12 @@ func (c *Client) Exchange(code string) (*auth.TokenDetails, error) {
 		return nil, fmt.Errorf("exchanging auth code: %w", err)
 	}
 	if rsp.StatusCode != http.StatusOK {
+		if rsp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf(
+				"exchanging auth code: %w",
+				auth.ErrUnauthorized,
+			)
+		}
 		return nil, fmt.Errorf(
 			"auth code exchange status: wanted `200`; found `%d`",
 			rsp.StatusCode,
