@@ -12,7 +12,6 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/weberc2/auth/pkg/auth"
 	"github.com/weberc2/auth/pkg/testsupport"
-	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
 	pztest "github.com/weberc2/httpeasy/testsupport"
 )
@@ -187,13 +186,6 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 			TokenValidity: time.Minute,
 			SigningKey:    authCodeKey,
 		}
-		codeToken = func() *types.Token {
-			tok, err := authCodeFactory.Create(now, subject)
-			if err != nil {
-				t.Fatalf("creating auth code token: %v", err)
-			}
-			return tok
-		}()
 	)
 
 	jwt.TimeFunc = func() time.Time { return now }
@@ -201,7 +193,9 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 
 	for _, testCase := range []struct {
 		name            string
-		params          map[string]string
+		redirect        string
+		tokenCreated    time.Time
+		omitCodeParam   bool
 		redirectDefault string
 		baseURL         string
 		wantedStatus    int
@@ -209,11 +203,9 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 		wantedTokens    bool
 	}{
 		{
-			name: "simple",
-			params: map[string]string{
-				"redirect": "intended",
-				"code":     codeToken.Token,
-			},
+			name:            "simple",
+			tokenCreated:    now,
+			redirect:        "intended",
 			redirectDefault: "default",
 			wantedStatus:    http.StatusSeeOther,
 			wantedTokens:    true,
@@ -221,18 +213,17 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 		},
 		{
 			name:            "empty redirect param",
-			params:          map[string]string{"code": codeToken.Token},
+			redirect:        "",
+			tokenCreated:    now,
 			redirectDefault: "default",
 			wantedStatus:    http.StatusSeeOther,
 			wantedTokens:    true,
 			wantedLocation:  "default",
 		},
 		{
-			name: "invalid redirect param",
-			params: map[string]string{
-				"redirect": "\n",
-				"code":     codeToken.Token,
-			},
+			name:            "invalid redirect param",
+			redirect:        "\n",
+			tokenCreated:    now,
 			redirectDefault: "default",
 			wantedStatus:    http.StatusSeeOther,
 			wantedTokens:    true,
@@ -240,14 +231,29 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 		},
 		{
 			name:            "missing code param",
-			params:          map[string]string{"redirect": "intended"},
+			redirect:        "intended",
+			tokenCreated:    now,
+			omitCodeParam:   true,
 			redirectDefault: "default",
 			wantedStatus:    http.StatusBadRequest,
 			wantedTokens:    false,
 			wantedLocation:  "",
 		},
+		{
+			// when an expired code is exchanged, the server will return a 401
+			// which should be propagated to the client.
+			name:            "invalid code",
+			redirect:        "intended",
+			tokenCreated:    now.Add(-24 * 30 * time.Hour),
+			redirectDefault: "default",
+			wantedStatus:    http.StatusUnauthorized,
+			wantedTokens:    false,
+			wantedLocation:  "",
+		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
+			jwt.TimeFunc = func() time.Time { return now }
+			defer func() { jwt.TimeFunc = time.Now }()
 			app := WebServerApp{
 				Client: testClient(testAuthServer(
 					t,
@@ -273,9 +279,17 @@ func TestWebServerApp_AuthCodeCallback(t *testing.T) {
 
 			appClient := testHTTPClient(appSrv)
 
+			code, err := authCodeFactory.Create(testCase.tokenCreated, subject)
+			if err != nil {
+				t.Fatalf("creating auth code token: %v", err)
+			}
+
 			values := url.Values{}
-			for key, value := range testCase.params {
-				values.Add(key, value)
+			if !testCase.omitCodeParam {
+				values.Add("code", code.Token)
+			}
+			if testCase.redirect != "" {
+				values.Add("redirect", testCase.redirect)
 			}
 
 			url := fmt.Sprintf(
