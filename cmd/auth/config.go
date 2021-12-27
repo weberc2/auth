@@ -132,6 +132,10 @@ func (c *Config) Run() error {
 	if err != nil {
 		return fmt.Errorf("opening token store database connection: %w", err)
 	}
+	if err := tokenStore.EnsureTable(); err != nil {
+		return fmt.Errorf("ensuring tokens table exists: %w", err)
+	}
+
 	authService := auth.AuthHTTPService{
 		AuthService: auth.AuthService{
 			Tokens: tokenStore,
