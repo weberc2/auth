@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"net/mail"
 	"time"
 
@@ -18,10 +19,22 @@ var (
 		Status:  401,
 		Message: "invalid username or password",
 	}
-	ErrUnauthorized      = &pz.HTTPError{Status: 401, Message: "Unauthorized"}
-	ErrUserExists        = errors.New("user already exists")
-	ErrInvalidResetToken = errors.New("reset token invalid")
-	ErrInvalidEmail      = errors.New("invalid email address")
+	ErrUnauthorized = &pz.HTTPError{
+		Status:  http.StatusUnauthorized,
+		Message: "unauthorized",
+	}
+	ErrUserExists = &pz.HTTPError{
+		Status:  http.StatusConflict,
+		Message: "user already exists",
+	}
+	ErrInvalidEmail = &pz.HTTPError{
+		Status:  http.StatusBadRequest,
+		Message: "invalid email address",
+	}
+	ErrInvalidResetToken = &pz.HTTPError{
+		Status:  http.StatusUnauthorized,
+		Message: "reset token invalid",
+	}
 )
 
 type TokenFactory struct {
@@ -147,7 +160,7 @@ func (as *AuthService) Register(user types.UserID, email string) error {
 		return fmt.Errorf("registering user: %w", ErrUserExists)
 	}
 
-	// TODO: Error if user or email already exists
+	// TODO: Error if email already exists
 	token, err := as.ResetTokens.Create(as.TimeFunc(), user, email)
 	if err != nil {
 		return fmt.Errorf("registering user: %w", err)
@@ -212,6 +225,29 @@ func (as *AuthService) UpdatePassword(up *UpdatePassword) error {
 		Password: up.Password,
 	}); err != nil {
 		return fmt.Errorf("updating password: %w", err)
+	}
+
+	return nil
+}
+
+func (as *AuthService) ConfirmRegistration(token, password string) error {
+	claims, err := as.ResetTokens.Claims(token)
+	if err != nil {
+		return fmt.Errorf("parsing token claims: %w", err)
+	}
+
+	// We deliberately want to return `ErrInvalidResetToken` in this case so
+	// as not to give attackers unnecessary information. See OWASP link above.
+	if err := claims.Valid(); err != nil {
+		return fmt.Errorf("confirming registration: %w", ErrInvalidResetToken)
+	}
+
+	if err := as.Creds.Create(&types.Credentials{
+		User:     claims.User,
+		Email:    claims.Email,
+		Password: password,
+	}); err != nil {
+		return fmt.Errorf("confirming registration: %w", err)
 	}
 
 	return nil

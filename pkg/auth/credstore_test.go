@@ -11,9 +11,11 @@ func TestCreate(t *testing.T) {
 	const password = "oiusdpafohwerkljsfkljads;fweqr"
 
 	var entry *types.UserEntry
-	if err := (&CredStore{&userStoreMock{
-		create: func(e *types.UserEntry) error { entry = e; return nil },
-	}}).Create(&types.Credentials{
+	if err := (&CredStore{
+		Users: &userStoreMock{
+			create: func(e *types.UserEntry) error { entry = e; return nil },
+		},
+	}).Create(&types.Credentials{
 		User:     "user",
 		Email:    "user@example.org",
 		Password: password,
@@ -51,9 +53,11 @@ func TestUpsert(t *testing.T) {
 	const password = "oiusdpafohwerkljsfkljads;fweqr"
 
 	var entry *types.UserEntry
-	if err := (&CredStore{&userStoreMock{
-		upsert: func(e *types.UserEntry) error { entry = e; return nil },
-	}}).Upsert(&types.Credentials{
+	if err := (&CredStore{
+		Users: &userStoreMock{
+			upsert: func(e *types.UserEntry) error { entry = e; return nil },
+		},
+	}).Upsert(&types.Credentials{
 		User:     "user",
 		Email:    "user@example.org",
 		Password: password,

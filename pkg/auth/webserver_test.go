@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	html "html/template"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,10 +14,231 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/weberc2/auth/pkg/testsupport"
+	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
+	pztest "github.com/weberc2/httpeasy/testsupport"
 )
 
-func TestLoginHandler(t *testing.T) {
+func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
+	const success = "registration successful"
+	regFormTemplate, err := html.New("").
+		Parse(`FormAction={{.FormAction}};ErrorMessage={{.ErrorMessage}}`)
+	if err != nil {
+		t.Fatalf("unexpected error parsing test template: %v", err)
+	}
+	for _, testCase := range []struct {
+		name                string
+		existingUsers       testsupport.UserStoreFake
+		body                string
+		wantedStatus        int
+		wantedData          pztest.WantedData
+		wantedNotifications []*types.Notification
+	}{
+		{
+			name:         "simple",
+			body:         form("user", "user@example.org"),
+			wantedStatus: http.StatusCreated,
+			wantedData:   wantedString(success),
+			wantedNotifications: []*types.Notification{{
+				Type:  types.NotificationTypeRegister,
+				User:  "user",
+				Email: "user@example.org",
+				Token: func() string {
+					tok, err := resetTokenFactory.Create(
+						now,
+						"user",
+						"user@example.org",
+					)
+					if err != nil {
+						t.Fatalf(
+							"unexpected error creating reset token: %v",
+							err,
+						)
+					}
+					return tok
+				}(),
+			}},
+		},
+		{
+			name:         "invalid form data",
+			body:         ";", // invalid form data
+			wantedStatus: http.StatusBadRequest,
+			wantedData:   ErrParsingFormData,
+		},
+		{
+			name: "username exists",
+			existingUsers: testsupport.UserStoreFake{
+				"user": {
+					User:  "user",
+					Email: "user@example.org",
+				},
+			},
+			body:         form("user", "user@example.org"),
+			wantedStatus: http.StatusConflict,
+			wantedData: &wantedTemplate{
+				tmpl: regFormTemplate,
+				values: registrationFormContext{
+					FormAction:   pathRegistrationForm,
+					ErrorMessage: ErrUserExists.Message,
+				},
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			notificationService := testsupport.NotificationServiceFake{}
+			if testCase.existingUsers == nil {
+				testCase.existingUsers = testsupport.UserStoreFake{}
+			}
+			webServer := WebServer{
+				AuthService: AuthService{
+					Creds: CredStore{
+						Users: testCase.existingUsers,
+						ValidateFunc: func(*types.Credentials) error {
+							return nil
+						},
+					},
+					Tokens:      testsupport.TokenStoreFake{},
+					ResetTokens: resetTokenFactory,
+					TokenDetails: TokenDetailsFactory{
+						AccessTokens:  accessTokenFactory,
+						RefreshTokens: refreshTokenFactory,
+						TimeFunc:      func() time.Time { return now },
+					},
+					Codes:         codesTokenFactory,
+					TimeFunc:      func() time.Time { return now },
+					Notifications: &notificationService,
+				},
+				BaseURL:                        "https://auth.example.org",
+				RedirectDomain:                 "https://app.example.org",
+				DefaultRedirectLocation:        "https://app.example.org/index.html",
+				RegistrationHandlerSuccessPage: success,
+				RegistrationForm:               regFormTemplate,
+			}
+			rsp := webServer.RegistrationHandlerRoute().Handler(pz.Request{
+				Body: strings.NewReader(testCase.body),
+			})
+			if rsp.Status != testCase.wantedStatus {
+				t.Fatalf(
+					"Response.Status: wanted `%d`; found `%d`",
+					testCase.wantedStatus,
+					rsp.Status,
+				)
+			}
+
+			if err := pztest.CompareSerializer(
+				testCase.wantedData,
+				rsp.Data,
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			wanted := testCase.wantedNotifications
+			found := notificationService.Notifications
+			if len(wanted) != len(found) {
+				t.Fatalf(
+					"sent notifications: length: wanted `%d`; found `%d`",
+					len(wanted),
+					len(found),
+				)
+			}
+
+			for i := range wanted {
+				if wanted[i].Email != found[i].Email {
+					t.Fatalf(
+						"Notifications[%d].Email: wanted `%s`; found `%s`",
+						i,
+						wanted[i].Email,
+						found[i].Email,
+					)
+				}
+
+				if wanted[i].Type != found[i].Type {
+					t.Fatalf(
+						"Notifications[%d].Type: wanted `%s`; found `%s`",
+						i,
+						wanted[i].Type,
+						found[i].Type,
+					)
+				}
+
+				if wanted[i].User != found[i].User {
+					t.Fatalf(
+						"Notifications[%d].User: wanted `%s`; found `%s`",
+						i,
+						wanted[i].User,
+						found[i].User,
+					)
+				}
+
+				wantedClaims, err := parseClaims(wanted[i].Token)
+				if err != nil {
+					t.Fatalf(
+						"Notifications[%d].Token: parsing wanted token: %v",
+						i,
+						err,
+					)
+				}
+
+				foundClaims, err := parseClaims(found[i].Token)
+				if err != nil {
+					t.Fatalf(
+						"Notifications[%d].Token: parsing found token: %v",
+						i,
+						err,
+					)
+				}
+
+				if *wantedClaims != *foundClaims {
+					wanted, err := json.Marshal(wantedClaims)
+					if err != nil {
+						t.Fatalf(
+							"marshaling wanted[%d]'s token claims: %v",
+							i,
+							err,
+						)
+					}
+					found, err := json.Marshal(foundClaims)
+					if err != nil {
+						t.Fatalf(
+							"marshaling found[%d]'s token claims: %v",
+							i,
+							err,
+						)
+					}
+					t.Fatalf(
+						"Notifications[%d].Token: wanted `%s`; found `%s`",
+						i,
+						wanted,
+						found,
+					)
+				}
+			}
+		})
+	}
+}
+
+func form(username, email string) string {
+	return url.Values{
+		"username": []string{username},
+		"email":    []string{email},
+	}.Encode()
+}
+
+func parseClaims(tok string) (*Claims, error) {
+	var claims Claims
+	if _, err := jwt.ParseWithClaims(
+		tok,
+		&claims,
+		func(*jwt.Token) (interface{}, error) {
+			return &resetTokenFactory.SigningKey.PublicKey, nil
+		},
+	); err != nil {
+		return nil, fmt.Errorf("parsing token: %w", err)
+	}
+	return &claims, nil
+}
+
+func TestWebServer_LoginHandler(t *testing.T) {
 	codes := TokenFactory{
 		Issuer:        "issuer",
 		Audience:      "audience",
@@ -62,7 +285,7 @@ func TestLoginHandler(t *testing.T) {
 				Creds: CredStore{
 					Users: testCase.stateUsers,
 				},
-				Notifications: testsupport.NotificationServiceFake{},
+				Notifications: &testsupport.NotificationServiceFake{},
 				Codes:         codes,
 				TimeFunc:      nowTimeFunc,
 			},
@@ -174,6 +397,33 @@ func (wanted *wantedLocation) compare(found string) error {
 		},
 	); err != nil {
 		return fmt.Errorf("URL.Query[\"code\"]: parsing JWT: %w", err)
+	}
+
+	return nil
+}
+
+type wantedString string
+
+func (ws wantedString) CompareData(data []byte) error {
+	if ws != wantedString(data) {
+		return fmt.Errorf("wanted `%s`; found `%s`", ws, data)
+	}
+	return nil
+}
+
+type wantedTemplate struct {
+	tmpl   *html.Template
+	values interface{}
+}
+
+func (wt *wantedTemplate) CompareData(data []byte) error {
+	var buf bytes.Buffer
+	if err := wt.tmpl.Execute(&buf, wt.values); err != nil {
+		return fmt.Errorf("executing HTML template: %w", err)
+	}
+
+	if wanted, found := buf.String(), string(data); wanted != found {
+		return fmt.Errorf("wanted `%s`; found `%s`", wanted, found)
 	}
 
 	return nil

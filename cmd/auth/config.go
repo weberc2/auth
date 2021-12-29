@@ -160,7 +160,7 @@ func (c *Config) Run() error {
 				Sender: c.NotificationSender,
 				TokenURL: func(tok string) string {
 					return fmt.Sprintf(
-						"https://%s/password?t=%s",
+						"https://%s/confirm?t=%s",
 						c.HostName,
 						tok,
 					)
@@ -194,7 +194,7 @@ func (c *Config) Run() error {
 <body>
 <h1>Login</h1>
 {{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
-<form action={{ .FormAction }} method="POST">
+<form action="{{ .FormAction }}" method="POST">
 	<label for="username">Username</label>
 	<input type="text" id="username" name="username"><br><br>
 	<label for="password">Password</label>
@@ -207,12 +207,63 @@ func (c *Config) Run() error {
 		return fmt.Errorf("parsing login form template: %w", err)
 	}
 
+	registrationForm, err := html.New("").Parse(`<html>
+<head>
+	<title>Register</title>
+</head>
+<body>
+<h1>Register</h1>
+{{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
+<form action="{{ .FormAction }}" method="POST">
+	<label for="username">Username</label>
+	<input type="text" id="username" name="username"><br><br>
+	<label for="email">Email</label>
+	<input type="text" id="email" name="email"><br><br>
+	<input type="submit" value="Submit">
+</form>
+</body>
+</html>`)
+	if err != nil {
+		return fmt.Errorf("parsing registration form template: %w", err)
+	}
+	registrationHandlerSuccessPage := `<html>
+<head>
+	<title>Registration Accepted</title>
+<body>
+<h1>
+Registration Accepted
+</h1>
+<p>An email has been sent to the email address provided. Please check your
+email for a confirmation link.</p>
+</body>
+</head>
+</html>`
+
+	registrationConfirmationForm, err := html.New("").Parse(`<html>
+<head>
+	<title>Confirm Registration</title>
+</head>
+<body>
+<h1>Confirm Registration<h1>
+{{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
+<form action="{{ .FormAction }}" method="POST">
+	<label for="password">Password</label>
+	<input type="password" id="password" name="password"><br><br>
+	<input type="hidden" id="token" name="token" value="{{.Token}}">
+	<input type="submit" value="Submit">
+</form>
+</body>
+</html>`)
+
 	webServer := auth.WebServer{
-		AuthService:             authService.AuthService,
-		BaseURL:                 c.BaseURL.Std(),
-		RedirectDomain:          c.RedirectDomain,
-		DefaultRedirectLocation: c.DefaultRedirectLocation,
-		LoginForm:               loginForm,
+		AuthService:                    authService.AuthService,
+		BaseURL:                        c.BaseURL.Std(),
+		RedirectDomain:                 c.RedirectDomain,
+		DefaultRedirectLocation:        c.DefaultRedirectLocation,
+		LoginForm:                      loginForm,
+		RegistrationForm:               registrationForm,
+		RegistrationHandlerSuccessPage: registrationHandlerSuccessPage,
+		RegistrationConfirmationForm:   registrationConfirmationForm,
 	}
 
 	log.Printf(`{"message": "listening on %s"}`, c.Addr)
@@ -232,6 +283,10 @@ func (c *Config) Run() error {
 					Method:  "POST",
 					Handler: webServer.LoginHandler,
 				},
+				webServer.RegistrationFormRoute(),
+				webServer.RegistrationHandlerRoute(),
+				webServer.RegistrationConfirmationFormRoute(),
+				webServer.RegistrationConfirmationHandlerRoute(),
 			)...,
 		),
 	); err != nil {

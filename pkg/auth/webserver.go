@@ -6,6 +6,7 @@ import (
 	html "html/template"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -38,17 +39,174 @@ type WebServer struct {
 
 	// LoginForm is the HTML template containing the login form page HTML.
 	LoginForm *html.Template
+
+	// RegistrationForm is the HTML template containing the registration form
+	// page HTML.
+	RegistrationForm *html.Template
+
+	// RegistrationHandlerSuccessPage is the HTML data sent to a client when
+	// the registration is successfully kicked off.
+	RegistrationHandlerSuccessPage string
+
+	// RegistrationConfirmationForm is the HTML template containing the
+	// registration confirmation form page HTML.
+	RegistrationConfirmationForm *html.Template
+}
+
+const (
+	pathRegistrationConfirmationHandler = "/confirm"
+	pathRegistrationConfirmationForm    = "/confirm"
+	pathRegistrationHandler             = "/register"
+	pathRegistrationForm                = "/register"
+)
+
+func (ws *WebServer) RegistrationFormRoute() pz.Route {
+	return pz.Route{
+		Path:   pathRegistrationForm,
+		Method: "GET",
+		Handler: func(r pz.Request) pz.Response {
+			context := registrationFormContext{
+				FormAction: pathRegistrationHandler,
+			}
+			return pz.Ok(
+				pz.HTMLTemplate(ws.RegistrationForm, &context),
+				&context,
+			)
+		},
+	}
+}
+
+var ErrParsingFormData = &pz.HTTPError{
+	Status:  http.StatusBadRequest,
+	Message: "error parsing form data",
+}
+
+type registrationFormContext struct {
+	FormAction   string `json:"formAction"`
+	ErrorMessage string `json:"errorMessage,omitempty"` // for html template
+	PrivateError string `json:"privateError,omitempty"` // logging only
+}
+
+func (ws *WebServer) RegistrationHandlerRoute() pz.Route {
+	return pz.Route{
+		Path:   pathRegistrationHandler,
+		Method: "POST",
+		Handler: func(r pz.Request) pz.Response {
+			form, err := parseForm(r)
+			if err != nil {
+				return pz.HandleError(
+					"error parsing form data",
+					ErrParsingFormData,
+					&logging{
+						Message:   "parsing registration form data",
+						ErrorType: fmt.Sprintf("%T", err),
+						Error:     err.Error(),
+					},
+				)
+			}
+
+			username := types.UserID(form.Get("username"))
+			if err := ws.AuthService.Register(
+				username,
+				form.Get("email"),
+			); err != nil {
+				httpErr := &pz.HTTPError{
+					Status:  http.StatusInternalServerError,
+					Message: "internal server error",
+				}
+				errors.As(err, &httpErr)
+				context := registrationFormContext{
+					FormAction:   pathRegistrationHandler,
+					ErrorMessage: httpErr.Message,
+					PrivateError: err.Error(),
+				}
+				return pz.Response{
+					Status: httpErr.Status,
+					Data:   pz.HTMLTemplate(ws.RegistrationForm, &context),
+				}.WithLogging(&context)
+			}
+			return pz.Created(
+				pz.String(ws.RegistrationHandlerSuccessPage),
+				&logging{
+					Message: "kicked off user registration",
+					User:    username,
+				},
+			)
+		},
+	}
+}
+
+func (ws *WebServer) RegistrationConfirmationFormRoute() pz.Route {
+	return pz.Route{
+		Path:   pathRegistrationConfirmationForm,
+		Method: "GET",
+		Handler: func(r pz.Request) pz.Response {
+			context := registrationConfirmationContext{
+				FormAction: pathRegistrationConfirmationHandler,
+				Token:      r.URL.Query().Get("t"),
+			}
+			return pz.Ok(
+				pz.HTMLTemplate(ws.RegistrationConfirmationForm, &context),
+				&context,
+			)
+		},
+	}
+}
+
+type registrationConfirmationContext struct {
+	FormAction   string `json:"formAction"`
+	Token        string `json:"token"`                  // hidden form field
+	ErrorMessage string `json:"errorMessage,omitempty"` // for html template
+	PrivateError string `json:"privateError,omitempty"` // logging only
+}
+
+func (ws *WebServer) RegistrationConfirmationHandlerRoute() pz.Route {
+	return pz.Route{
+		Path:   pathRegistrationConfirmationHandler,
+		Method: "POST",
+		Handler: func(r pz.Request) pz.Response {
+			form, err := parseForm(r)
+			if err != nil {
+				return pz.BadRequest(pz.String("error parsing form"), &logging{
+					Message: "parsing registration confirmation form",
+					Error:   err.Error(),
+				})
+			}
+			if err := ws.AuthService.ConfirmRegistration(
+				form.Get("token"),
+				form.Get("password"),
+			); err != nil {
+				httpErr := &pz.HTTPError{
+					Status:  http.StatusInternalServerError,
+					Message: "internal server error",
+				}
+				_ = errors.As(err, &httpErr)
+				context := registrationConfirmationContext{
+					FormAction:   pathRegistrationConfirmationForm,
+					Token:        form.Get("token"),
+					ErrorMessage: httpErr.Message,
+				}
+				return pz.Response{
+					Status: httpErr.Status,
+					Data: pz.HTMLTemplate(
+						ws.RegistrationConfirmationForm,
+						&context,
+					),
+				}.WithLogging(&context)
+			}
+			return pz.SeeOther(ws.DefaultRedirectLocation, &struct {
+				Message string `json:"message"`
+			}{"successfully registered user"})
+		},
+	}
 }
 
 func (ws *WebServer) LoginFormPage(r pz.Request) pz.Response {
 	query := r.URL.Query()
 
 	// create a struct for templating and logging
-	x := struct {
-		// This is intended to be a user-facing message shown in the templated
-		// UI.
-		ErrorMessage string `json:"errorMessage"`
-		FormAction   string `json:"formAction"`
+	context := struct {
+		FormAction string `json:"formAction"`
 	}{
 		FormAction: ws.BaseURL + "login?" + url.Values{
 			"callback": []string{query.Get("callback")},
@@ -56,24 +214,27 @@ func (ws *WebServer) LoginFormPage(r pz.Request) pz.Response {
 		}.Encode(),
 	}
 
-	return pz.Ok(pz.HTMLTemplate(ws.LoginForm, &x), &x)
+	return pz.Ok(pz.HTMLTemplate(ws.LoginForm, &context), &context)
 }
 
 func (ws *WebServer) LoginHandler(r pz.Request) pz.Response {
-	username, password, err := parseMultiPartForm(r)
+	form, err := parseForm(r)
 	if err != nil {
 		return pz.BadRequest(
 			pz.Stringf("parsing credentials: %v", err),
 			&logging{
-				Message: "parsing credentials from multi-part form",
-				Error:   err.Error(),
+				Message:   "parsing credentials from multi-part form",
+				ErrorType: fmt.Sprintf("%T", err),
+				Error:     err.Error(),
 			},
 		)
 	}
 
+	username := types.UserID(form.Get("username"))
+
 	code, err := ws.AuthService.LoginAuthCode(&types.Credentials{
-		User:     types.UserID(username),
-		Password: password,
+		User:     username,
+		Password: form.Get("password"),
 	})
 	if err != nil {
 		if errors.Is(err, ErrCredentials) {
@@ -87,14 +248,14 @@ func (ws *WebServer) LoginHandler(r pz.Request) pz.Response {
 					ErrorMessage: "Invalid credentials",
 				}),
 				&logging{
-					User:    types.UserID(username),
+					User:    username,
 					Message: "login failed",
 					Error:   err.Error(),
 				},
 			)
 		}
 		return pz.InternalServerError(&logging{
-			User:      types.UserID(username),
+			User:      username,
 			Message:   "logging in",
 			ErrorType: fmt.Sprintf("%T", err),
 			Error:     err.Error(),
@@ -191,16 +352,16 @@ type redirectResult struct {
 	ValidationError string   `json:"validationError,omitempty"`
 }
 
-func parseMultiPartForm(r pz.Request) (string, string, error) {
+func parseForm(r pz.Request) (url.Values, error) {
 	// Read at most 2kb data to avoid DOS attack. That should be plenty for our
 	// form.
 	data, err := ioutil.ReadAll(io.LimitReader(r.Body, 2056))
 	if err != nil {
-		return "", "", fmt.Errorf("reading request body: %w", err)
+		return nil, fmt.Errorf("reading request body: %w", err)
 	}
 	form, err := url.ParseQuery(string(data))
 	if err != nil {
-		return "", "", fmt.Errorf("parsing form data: %w", err)
+		return nil, fmt.Errorf("parsing form data: %w", err)
 	}
-	return form.Get("username"), form.Get("password"), nil
+	return form, nil
 }

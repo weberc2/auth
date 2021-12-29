@@ -2,6 +2,11 @@ package testsupport
 
 import "github.com/weberc2/auth/pkg/types"
 
-type NotificationServiceFake struct{}
+type NotificationServiceFake struct {
+	Notifications []*types.Notification
+}
 
-func (NotificationServiceFake) Notify(*types.Notification) error { return nil }
+func (nsf *NotificationServiceFake) Notify(n *types.Notification) error {
+	nsf.Notifications = append(nsf.Notifications, n)
+	return nil
+}
