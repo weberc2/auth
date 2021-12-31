@@ -298,17 +298,17 @@ func mustParseKey(keyString string) *ecdsa.PrivateKey {
 
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
-		panic(fmt.Sprintf("parsing x509 EC private key: %v", err))
+		log.Fatalf("parsing x509 EC private key: %v", err)
 	}
 
 	return key
 }
 
-func must(t *types.Token, err error) *types.Token {
+func must(s *types.Token, err error) *types.Token {
 	if err != nil {
 		panic(err)
 	}
-	return t
+	return s
 }
 
 type Wanted interface {

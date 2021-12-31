@@ -241,7 +241,10 @@ func (as *AuthService) UpdatePassword(up *UpdatePassword) error {
 func (as *AuthService) ConfirmRegistration(token, password string) error {
 	claims, err := as.ResetTokens.Claims(token)
 	if err != nil {
-		return TokenClaimsParseErr(err)
+		return fmt.Errorf(
+			"confirming registration: %w",
+			TokenClaimsParseErr(err),
+		)
 	}
 
 	// We deliberately want to return `ErrInvalidResetToken` in this case so

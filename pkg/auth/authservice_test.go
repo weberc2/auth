@@ -167,19 +167,17 @@ func TestAuthService_Login(t *testing.T) {
 	jwt.TimeFunc = func() time.Time { return now.Add(1 * time.Second) }
 	tokenStore := testsupport.TokenStoreFake{}
 	authService := AuthService{
-		Creds: CredStore{
-			Users: &userStoreMock{
-				get: func(u types.UserID) (*types.UserEntry, error) {
-					if u != "user" {
-						return nil, types.ErrUserNotFound
-					}
-					return &types.UserEntry{
-						User:         "user",
-						PasswordHash: hashed,
-					}, nil
-				},
+		Creds: CredStore{&userStoreMock{
+			get: func(u types.UserID) (*types.UserEntry, error) {
+				if u != "user" {
+					return nil, types.ErrUserNotFound
+				}
+				return &types.UserEntry{
+					User:         "user",
+					PasswordHash: hashed,
+				}, nil
 			},
-		},
+		}},
 		Tokens: tokenStore,
 		TokenDetails: TokenDetailsFactory{
 			AccessTokens: TokenFactory{
@@ -302,13 +300,11 @@ func TestAuthService_Register(t *testing.T) {
 		t.Fatalf("Unexpected err: %v", err)
 	}
 	authService := AuthService{
-		Creds: CredStore{
-			Users: &userStoreMock{
-				get: func(u types.UserID) (*types.UserEntry, error) {
-					return nil, types.ErrUserNotFound
-				},
+		Creds: CredStore{&userStoreMock{
+			get: func(u types.UserID) (*types.UserEntry, error) {
+				return nil, types.ErrUserNotFound
 			},
-		},
+		}},
 		ResetTokens: ResetTokenFactory{
 			Issuer:        "issuer",
 			Audience:      "audience",
