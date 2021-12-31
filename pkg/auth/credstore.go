@@ -20,7 +20,6 @@ var ErrPasswordTooSimple = &pz.HTTPError{
 
 type CredStore struct {
 	Users        types.UserStore
-	ValidateFunc func(*types.Credentials) error
 }
 
 func (cs *CredStore) Validate(creds *types.Credentials) error {
@@ -55,11 +54,8 @@ func validatePassword(creds *types.Credentials) error {
 	return nil
 }
 
-func makeUserEntry(
-	creds *types.Credentials,
-	validate func(*types.Credentials) error,
-) (*types.UserEntry, error) {
-	if err := validate(creds); err != nil {
+func makeUserEntry(creds *types.Credentials) (*types.UserEntry, error) {
+	if err := validatePassword(creds); err != nil {
 		return nil, err
 	}
 	hashedPassword, err := bcrypt.GenerateFromPassword(
@@ -77,11 +73,7 @@ func makeUserEntry(
 }
 
 func (cs *CredStore) Create(creds *types.Credentials) error {
-	validate := cs.ValidateFunc
-	if validate == nil {
-		validate = validatePassword
-	}
-	entry, err := makeUserEntry(creds, validate)
+	entry, err := makeUserEntry(creds)
 	if err != nil {
 		return fmt.Errorf("creating credentials: %w", err)
 	}
@@ -93,11 +85,7 @@ func (cs *CredStore) Create(creds *types.Credentials) error {
 }
 
 func (cs *CredStore) Upsert(creds *types.Credentials) error {
-	validate := cs.ValidateFunc
-	if validate == nil {
-		validate = validatePassword
-	}
-	entry, err := makeUserEntry(creds, validate)
+	entry, err := makeUserEntry(creds)
 	if err != nil {
 		return fmt.Errorf("creating user entry: %w", err)
 	}

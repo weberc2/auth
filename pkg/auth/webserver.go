@@ -158,6 +158,7 @@ type registrationConfirmationContext struct {
 	Token        string `json:"token"`                  // hidden form field
 	ErrorMessage string `json:"errorMessage,omitempty"` // for html template
 	PrivateError string `json:"privateError,omitempty"` // logging only
+	ErrorType    string `json:"errorType,omitempty"`    // type of PrivateError
 }
 
 func (ws *WebServer) RegistrationConfirmationHandlerRoute() pz.Route {
@@ -172,9 +173,10 @@ func (ws *WebServer) RegistrationConfirmationHandlerRoute() pz.Route {
 					Error:   err.Error(),
 				})
 			}
+			token, password := form.Get("token"), form.Get("password")
 			if err := ws.AuthService.ConfirmRegistration(
-				form.Get("token"),
-				form.Get("password"),
+				token,
+				password,
 			); err != nil {
 				httpErr := &pz.HTTPError{
 					Status:  http.StatusInternalServerError,
@@ -185,6 +187,8 @@ func (ws *WebServer) RegistrationConfirmationHandlerRoute() pz.Route {
 					FormAction:   pathRegistrationConfirmationForm,
 					Token:        form.Get("token"),
 					ErrorMessage: httpErr.Message,
+					PrivateError: err.Error(),
+					ErrorType:    fmt.Sprintf("%T", err),
 				}
 				return pz.Response{
 					Status: httpErr.Status,

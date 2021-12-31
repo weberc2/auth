@@ -46,21 +46,51 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 	for _, testCase := range []struct {
 		name      string
 		subject   types.UserID
+		token     string
 		email     string
 		password  string
-		wanted    types.Credentials
+		wanted    *types.Credentials
 		wantedErr types.WantedError
 	}{
 		{
 			name:     "simple",
 			subject:  "subject",
+			token:    must(resetTokenFactory.Create(
+				now,
+				"subject",
+				"subject@example.org",
+			)),
 			email:    "subject@example.org",
-			password: "password",
-			wanted: types.Credentials{
+			password: goodPassword,
+			wanted: &types.Credentials{
 				User:     "subject",
 				Email:    "subject@example.org",
-				Password: "password",
+				Password: goodPassword,
 			},
+		},
+		{
+			name: "token parse err",
+			subject: "user",
+			token: "",
+			email: "user@example.org",
+			password: goodPassword,
+			wanted: nil,
+			wantedErr: TokenClaimsParseErr(fmt.Errorf(
+				"parsing claims from token: %v",
+				jwt.NewValidationError(
+					"token contains an invalid number of segments",
+					jwt.ValidationErrorMalformed,
+				),
+			)),
+		},
+		{
+			name: "password validation err",
+			subject: "user",
+			token: must(resetTokenFactory.Create(now, "user", "user@example.org")),
+			email: "user@example.org",
+			password: "", // invalid
+			wanted: nil,
+			wantedErr: ErrPasswordTooSimple,
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -69,12 +99,7 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 
 			userStore := testsupport.UserStoreFake{}
 			authService := AuthService{
-				Creds: CredStore{
-					Users: userStore,
-					ValidateFunc: func(*types.Credentials) error {
-						return nil
-					},
-				},
+				Creds: CredStore{userStore},
 				Tokens: testsupport.TokenStoreFake{},
 				TokenDetails: TokenDetailsFactory{
 					AccessTokens:  accessTokenFactory,
@@ -89,21 +114,22 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 			if testCase.wantedErr == nil {
 				testCase.wantedErr = types.NilError{}
 			}
-			tok, err := resetTokenFactory.Create(
-				now,
-				testCase.subject,
-				testCase.email,
-			)
-			if err != nil {
-				t.Fatalf("unexpected error creating code token: %v", err)
-			}
 			if err := testCase.wantedErr.CompareErr(
-				authService.ConfirmRegistration(tok, testCase.password),
+				authService.ConfirmRegistration(
+					testCase.token,
+					testCase.password,
+				),
 			); err != nil {
 				t.Fatal(err)
 			}
 
 			entry, err := userStore.Get(testCase.subject)
+			if testCase.wanted == nil && errors.Is(
+				err,
+				types.ErrUserNotFound,
+			) {
+				return
+			}
 			if err != nil {
 				t.Fatalf(
 					"unexpected error getting user from user store: %v",
@@ -524,3 +550,5 @@ func hashBcrypt(password string) []byte {
 	}
 	return hash
 }
+
+var goodPassword = ";oasdfipas#@#$OPYODF:;asdf"

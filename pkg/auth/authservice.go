@@ -37,6 +37,14 @@ var (
 	}
 )
 
+func TokenClaimsParseErr(err error) *pz.HTTPError {
+	return &pz.HTTPError{
+		Status:  http.StatusBadRequest,
+		Message: "parsing token claims",
+		Cause_:  err,
+	}
+}
+
 type TokenFactory struct {
 	Issuer        string
 	Audience      string
@@ -233,7 +241,7 @@ func (as *AuthService) UpdatePassword(up *UpdatePassword) error {
 func (as *AuthService) ConfirmRegistration(token, password string) error {
 	claims, err := as.ResetTokens.Claims(token)
 	if err != nil {
-		return fmt.Errorf("parsing token claims: %w", err)
+		return TokenClaimsParseErr(err)
 	}
 
 	// We deliberately want to return `ErrInvalidResetToken` in this case so

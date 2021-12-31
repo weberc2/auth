@@ -19,6 +19,125 @@ import (
 	pztest "github.com/weberc2/httpeasy/testsupport"
 )
 
+func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
+	const defaultRedirectLocation = "https://app.example.org/index.html"
+	for _, testCase := range []struct {
+		name           string
+		existingUsers  testsupport.UserStoreFake
+		body           string
+		wantedStatus   int
+		wantedLocation string
+		wantedUsers    []types.Credentials
+	}{
+		{
+			name: "simple",
+			body: confirmationForm(
+				must(resetTokenFactory.Create(
+					now,
+					"user",
+					"user@example.org",
+				)),
+				goodPassword,
+			),
+			wantedStatus:   http.StatusSeeOther,
+			wantedLocation: defaultRedirectLocation,
+			wantedUsers: []types.Credentials{{
+				User:     "user",
+				Email:    "user@example.org",
+				Password: goodPassword,
+			}},
+		},
+		{
+			name:         "missing token",
+			body:         confirmationForm("", goodPassword),
+			wantedStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing password",
+			body: confirmationForm(
+				must(resetTokenFactory.Create(
+					now,
+					"user",
+					"user@example.org",
+				)),
+				"", // password
+			),
+			wantedStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			confirmationForm, err := html.New("").
+				Parse(`FormAction={{.FormAction}};Token={{.Token}};ErrorMessage={{.ErrorMessage}}`)
+			if err != nil {
+				t.Fatalf("unexpected error parsing test template: %v", err)
+			}
+			if testCase.existingUsers == nil {
+				testCase.existingUsers = testsupport.UserStoreFake{}
+			}
+			webServer := WebServer{
+				AuthService: AuthService{
+					Creds: CredStore{ testCase.existingUsers },
+					Tokens:      testsupport.TokenStoreFake{},
+					ResetTokens: resetTokenFactory,
+					TokenDetails: TokenDetailsFactory{
+						AccessTokens:  accessTokenFactory,
+						RefreshTokens: refreshTokenFactory,
+						TimeFunc:      func() time.Time { return now },
+					},
+					Codes:    codesTokenFactory,
+					TimeFunc: func() time.Time { return now },
+				},
+				BaseURL:                      "https://auth.example.org",
+				RedirectDomain:               "https://app.example.org",
+				DefaultRedirectLocation:      defaultRedirectLocation,
+				RegistrationConfirmationForm: confirmationForm,
+			}
+
+			rsp := webServer.RegistrationConfirmationHandlerRoute().Handler(
+				pz.Request{
+					Body: strings.NewReader(testCase.body),
+				},
+			)
+
+			if rsp.Status != testCase.wantedStatus {
+				data, err := json.Marshal(rsp.Logging)
+				if err != nil {
+					t.Logf("marshaling response logging: %v", err)
+				}
+				t.Logf("LOGS: %s", data)
+				t.Fatalf(
+					"Response.Status: wanted `%d`; found `%d`",
+					testCase.wantedStatus,
+					rsp.Status,
+				)
+			}
+
+			if l := rsp.Headers.Get("Location"); l != testCase.wantedLocation {
+				t.Fatalf(
+					"Response.Headers[\"Location\"]: wanted `%s`; found `%s`",
+					testCase.wantedLocation,
+					l,
+				)
+			}
+
+			found := testCase.existingUsers.List()
+			if len(found) != len(testCase.wantedUsers) {
+				t.Fatalf(
+					"len(UserStore): wanted `%d`; found `%d`",
+					len(testCase.wantedUsers),
+					len(found),
+				)
+			}
+
+			for i, creds := range testCase.wantedUsers {
+				if err := creds.CompareUserEntry(found[i]); err != nil {
+					t.Fatalf("UserStore[%d]: %v", i, err)
+				}
+			}
+		})
+	}
+}
+
 func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 	const success = "registration successful"
 	regFormTemplate, err := html.New("").
@@ -36,7 +155,7 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 	}{
 		{
 			name:         "simple",
-			body:         form("user", "user@example.org"),
+			body:         registrationForm("user", "user@example.org"),
 			wantedStatus: http.StatusCreated,
 			wantedData:   wantedString(success),
 			wantedNotifications: []*types.Notification{{
@@ -73,7 +192,7 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 					Email: "user@example.org",
 				},
 			},
-			body:         form("user", "user@example.org"),
+			body:         registrationForm("user", "user@example.org"),
 			wantedStatus: http.StatusConflict,
 			wantedData: &wantedTemplate{
 				tmpl: regFormTemplate,
@@ -91,12 +210,7 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 			}
 			webServer := WebServer{
 				AuthService: AuthService{
-					Creds: CredStore{
-						Users: testCase.existingUsers,
-						ValidateFunc: func(*types.Credentials) error {
-							return nil
-						},
-					},
+					Creds: CredStore{testCase.existingUsers},
 					Tokens:      testsupport.TokenStoreFake{},
 					ResetTokens: resetTokenFactory,
 					TokenDetails: TokenDetailsFactory{
@@ -217,10 +331,17 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 	}
 }
 
-func form(username, email string) string {
+func registrationForm(username, email string) string {
 	return url.Values{
 		"username": []string{username},
 		"email":    []string{email},
+	}.Encode()
+}
+
+func confirmationForm(token, password string) string {
+	return url.Values{
+		"token":    []string{token},
+		"password": []string{password},
 	}.Encode()
 }
 
@@ -407,6 +528,13 @@ type wantedString string
 func (ws wantedString) CompareData(data []byte) error {
 	if ws != wantedString(data) {
 		return fmt.Errorf("wanted `%s`; found `%s`", ws, data)
+	}
+	return nil
+}
+
+func (ws wantedString) CompareErr(err error) error {
+	if err == nil || err.Error() != string(ws) {
+		return fmt.Errorf("wanted `%s`; found `%v`", ws, err)
 	}
 	return nil
 }

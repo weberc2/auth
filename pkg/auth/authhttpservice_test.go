@@ -260,10 +260,10 @@ func nowTimeFunc() time.Time { return now }
 var (
 	now                = time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
 	user               = types.UserID("user")
-	accessSigningKey   = mustParseKey(accessSigningKeyString)
-	refreshSigningKey  = mustParseKey(refreshSigningKeyString)
-	resetSigningKey    = mustParseKey(resetSigningKeyString)
-	codesSigningKey    = mustParseKey(codesSigningKeyString)
+	accessSigningKey   = must(parseKey(accessSigningKeyString))
+	refreshSigningKey  = must(parseKey(refreshSigningKeyString))
+	resetSigningKey    = must(parseKey(resetSigningKeyString))
+	codesSigningKey    = must(parseKey(codesSigningKeyString))
 	accessTokenFactory = TokenFactory{
 		Issuer:        "issuer",
 		Audience:      "audience",
@@ -293,22 +293,22 @@ var (
 	authCode     = must(codesTokenFactory.Create(now, string(user)))
 )
 
-func mustParseKey(keyString string) *ecdsa.PrivateKey {
+func parseKey(keyString string) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(keyString))
 
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
-		log.Fatalf("parsing x509 EC private key: %v", err)
+		return nil, fmt.Errorf("parsing x509 EC private key: %w", err)
 	}
 
-	return key
+	return key, nil
 }
 
-func must(s *types.Token, err error) *types.Token {
+func must[T any](t T, err error) T {
 	if err != nil {
 		panic(err)
 	}
-	return s
+	return t
 }
 
 type Wanted interface {

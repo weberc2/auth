@@ -20,3 +20,11 @@ func (usf UserStoreFake) Upsert(entry *types.UserEntry) error {
 	usf[entry.User] = entry
 	return nil
 }
+
+func (usf UserStoreFake) List() []*types.UserEntry {
+	entries := make([]*types.UserEntry, 0, len(usf))
+	for _, entry := range usf {
+		entries = append(entries, entry)
+	}
+	return entries
+}
