@@ -254,6 +254,12 @@ email for a confirmation link.</p>
 </form>
 </body>
 </html>`)
+	if err != nil {
+		return fmt.Errorf(
+			"parsing registration confirmation form template: %w",
+			err,
+		)
+	}
 
 	webServer := auth.WebServer{
 		AuthService:                    authService.AuthService,

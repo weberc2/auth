@@ -184,7 +184,7 @@ func testAuthService(options *authServiceOptions) (auth.AuthService, error) {
 	return auth.AuthService{
 		Tokens:        options.tokenStore,
 		Creds:         auth.CredStore{Users: options.userStore},
-		Notifications: testsupport.NotificationServiceFake{},
+		Notifications: &testsupport.NotificationServiceFake{},
 		Codes:         *options.authCodeFactory,
 		TokenDetails: auth.TokenDetailsFactory{
 			AccessTokens: auth.TokenFactory{
