@@ -36,10 +36,6 @@ type WebServer struct {
 	// DefaultRedirectLocation is the destination we send users to on success
 	// if no redirect location was specified in the query string.
 	DefaultRedirectLocation string
-
-	// RegistrationConfirmationForm is the HTML template containing the
-	// registration confirmation form page HTML.
-	RegistrationConfirmationForm *html.Template
 }
 
 const (
@@ -165,7 +161,7 @@ func (ws *WebServer) RegistrationConfirmationFormRoute() pz.Route {
 				Token:      r.URL.Query().Get("t"),
 			}
 			return pz.Ok(
-				pz.HTMLTemplate(ws.RegistrationConfirmationForm, &context),
+				pz.HTMLTemplate(registrationConfirmationForm, &context),
 				&context,
 			)
 		},
@@ -228,7 +224,7 @@ func (ws *WebServer) RegistrationConfirmationHandlerRoute() pz.Route {
 				return pz.Response{
 					Status: httpErr.Status,
 					Data: pz.HTMLTemplate(
-						ws.RegistrationConfirmationForm,
+						registrationConfirmationForm,
 						&context,
 					),
 				}.WithLogging(&context)

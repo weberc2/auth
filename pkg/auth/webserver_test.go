@@ -58,11 +58,6 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			confirmationForm, err := html.New("").
-				Parse(`FormAction={{.FormAction}};Token={{.Token}};ErrorMessage={{.ErrorMessage}}`)
-			if err != nil {
-				t.Fatalf("unexpected error parsing test template: %v", err)
-			}
 			if testCase.existingUsers == nil {
 				testCase.existingUsers = testsupport.UserStoreFake{}
 			}
@@ -79,10 +74,9 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 					Codes:    codesTokenFactory,
 					TimeFunc: func() time.Time { return now },
 				},
-				BaseURL:                      "https://auth.example.org",
-				RedirectDomain:               "https://app.example.org",
-				DefaultRedirectLocation:      defaultRedirectLocation,
-				RegistrationConfirmationForm: confirmationForm,
+				BaseURL:                 "https://auth.example.org",
+				RedirectDomain:          "https://app.example.org",
+				DefaultRedirectLocation: defaultRedirectLocation,
 			}
 
 			rsp := webServer.RegistrationConfirmationHandlerRoute().Handler(
