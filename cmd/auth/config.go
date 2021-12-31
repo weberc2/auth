@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	html "html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -187,89 +186,11 @@ func (c *Config) Run() error {
 		},
 	}
 
-	loginForm, err := html.New("").Parse(`<html>
-<head>
-	<title>Login</title>
-</head>
-<body>
-<h1>Login</h1>
-{{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
-<form action="{{ .FormAction }}" method="POST">
-	<label for="username">Username</label>
-	<input type="text" id="username" name="username"><br><br>
-	<label for="password">Password</label>
-	<input type="password" id="password" name="password"><br><br>
-	<input type="submit" value="Submit">
-</form>
-</body>
-</html>`)
-	if err != nil {
-		return fmt.Errorf("parsing login form template: %w", err)
-	}
-
-	registrationForm, err := html.New("").Parse(`<html>
-<head>
-	<title>Register</title>
-</head>
-<body>
-<h1>Register</h1>
-{{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
-<form action="{{ .FormAction }}" method="POST">
-	<label for="username">Username</label>
-	<input type="text" id="username" name="username"><br><br>
-	<label for="email">Email</label>
-	<input type="text" id="email" name="email"><br><br>
-	<input type="submit" value="Submit">
-</form>
-</body>
-</html>`)
-	if err != nil {
-		return fmt.Errorf("parsing registration form template: %w", err)
-	}
-	registrationHandlerSuccessPage := `<html>
-<head>
-	<title>Registration Accepted</title>
-<body>
-<h1>
-Registration Accepted
-</h1>
-<p>An email has been sent to the email address provided. Please check your
-email for a confirmation link.</p>
-</body>
-</head>
-</html>`
-
-	registrationConfirmationForm, err := html.New("").Parse(`<html>
-<head>
-	<title>Confirm Registration</title>
-</head>
-<body>
-<h1>Confirm Registration<h1>
-{{ if .ErrorMessage }}<p id="error-message">{{ .ErrorMessage }}</p>{{ end }}
-<form action="{{ .FormAction }}" method="POST">
-	<label for="password">Password</label>
-	<input type="password" id="password" name="password"><br><br>
-	<input type="hidden" id="token" name="token" value="{{.Token}}">
-	<input type="submit" value="Submit">
-</form>
-</body>
-</html>`)
-	if err != nil {
-		return fmt.Errorf(
-			"parsing registration confirmation form template: %w",
-			err,
-		)
-	}
-
 	webServer := auth.WebServer{
-		AuthService:                    authService.AuthService,
-		BaseURL:                        c.BaseURL.Std(),
-		RedirectDomain:                 c.RedirectDomain,
-		DefaultRedirectLocation:        c.DefaultRedirectLocation,
-		LoginForm:                      loginForm,
-		RegistrationForm:               registrationForm,
-		RegistrationHandlerSuccessPage: registrationHandlerSuccessPage,
-		RegistrationConfirmationForm:   registrationConfirmationForm,
+		AuthService:             authService.AuthService,
+		BaseURL:                 c.BaseURL.Std(),
+		RedirectDomain:          c.RedirectDomain,
+		DefaultRedirectLocation: c.DefaultRedirectLocation,
 	}
 
 	log.Printf(`{"message": "listening on %s"}`, c.Addr)

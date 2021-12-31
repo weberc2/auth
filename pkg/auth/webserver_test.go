@@ -131,12 +131,6 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 }
 
 func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
-	const success = "registration successful"
-	regFormTemplate, err := html.New("").
-		Parse(`FormAction={{.FormAction}};ErrorMessage={{.ErrorMessage}}`)
-	if err != nil {
-		t.Fatalf("unexpected error parsing test template: %v", err)
-	}
 	for _, testCase := range []struct {
 		name                string
 		existingUsers       testsupport.UserStoreFake
@@ -147,9 +141,9 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 	}{
 		{
 			name:         "simple",
-			body:         registrationForm("user", "user@example.org"),
+			body:         regForm("user", "user@example.org"),
 			wantedStatus: http.StatusCreated,
-			wantedData:   wantedString(success),
+			wantedData:   wantedString(registrationSuccessPage),
 			wantedNotifications: []*types.Notification{{
 				Type:  types.NotificationTypeRegister,
 				User:  "user",
@@ -184,10 +178,10 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 					Email: "user@example.org",
 				},
 			},
-			body:         registrationForm("user", "user@example.org"),
+			body:         regForm("user", "user@example.org"),
 			wantedStatus: http.StatusConflict,
 			wantedData: &wantedTemplate{
-				tmpl: regFormTemplate,
+				tmpl: registrationForm,
 				values: registrationFormContext{
 					FormAction:   pathRegistrationForm,
 					ErrorMessage: ErrUserExists.Message,
@@ -214,11 +208,9 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 					TimeFunc:      func() time.Time { return now },
 					Notifications: &notificationService,
 				},
-				BaseURL:                        "https://auth.example.org",
-				RedirectDomain:                 "https://app.example.org",
-				DefaultRedirectLocation:        "https://app.example.org/index.html",
-				RegistrationHandlerSuccessPage: success,
-				RegistrationForm:               regFormTemplate,
+				BaseURL:                 "https://auth.example.org",
+				RedirectDomain:          "https://app.example.org",
+				DefaultRedirectLocation: "https://app.example.org/index.html",
 			}
 			rsp := webServer.RegistrationHandlerRoute().Handler(pz.Request{
 				Body: strings.NewReader(testCase.body),
@@ -323,7 +315,7 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 	}
 }
 
-func registrationForm(username, email string) string {
+func regForm(username, email string) string {
 	return url.Values{
 		"username": []string{username},
 		"email":    []string{email},
