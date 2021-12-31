@@ -338,17 +338,15 @@ func TestAuthService_Register(t *testing.T) {
 
 func TestAuthService_Register_UserNameExists(t *testing.T) {
 	authService := AuthService{
-		Creds: CredStore{
-			Users: &userStoreMock{
-				get: func(u types.UserID) (*types.UserEntry, error) {
-					return &types.UserEntry{
-						User:         u,
-						Email:        "user@example.org",
-						PasswordHash: hashBcrypt("password"),
-					}, nil
-				},
+		Creds: CredStore{&userStoreMock{
+			get: func(u types.UserID) (*types.UserEntry, error) {
+				return &types.UserEntry{
+					User:         u,
+					Email:        "user@example.org",
+					PasswordHash: hashBcrypt("password"),
+				}, nil
 			},
-		},
+		}},
 	}
 
 	if err := authService.Register("user", "user@example.org"); err != nil {
