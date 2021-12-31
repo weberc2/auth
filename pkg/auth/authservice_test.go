@@ -55,11 +55,7 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 		{
 			name:     "simple",
 			subject:  "subject",
-			token:    must(resetTokenFactory.Create(
-				now,
-				"subject",
-				"subject@example.org",
-			)),
+			token:    mustResetToken(now, "subject", "subject@example.org"),
 			email:    "subject@example.org",
 			password: goodPassword,
 			wanted: &types.Credentials{
@@ -69,12 +65,12 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 			},
 		},
 		{
-			name: "token parse err",
-			subject: "user",
-			token: "",
-			email: "user@example.org",
+			name:     "token parse err",
+			subject:  "user",
+			token:    "",
+			email:    "user@example.org",
 			password: goodPassword,
-			wanted: nil,
+			wanted:   nil,
 			wantedErr: TokenClaimsParseErr(fmt.Errorf(
 				"parsing claims from token: %v",
 				jwt.NewValidationError(
@@ -84,12 +80,12 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 			)),
 		},
 		{
-			name: "password validation err",
-			subject: "user",
-			token: must(resetTokenFactory.Create(now, "user", "user@example.org")),
-			email: "user@example.org",
-			password: "", // invalid
-			wanted: nil,
+			name:      "password validation err",
+			subject:   "user",
+			token:     mustResetToken(now, "user", "user@example.org"),
+			email:     "user@example.org",
+			password:  "", // invalid
+			wanted:    nil,
 			wantedErr: ErrPasswordTooSimple,
 		},
 	} {
@@ -99,7 +95,7 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 
 			userStore := testsupport.UserStoreFake{}
 			authService := AuthService{
-				Creds: CredStore{userStore},
+				Creds:  CredStore{userStore},
 				Tokens: testsupport.TokenStoreFake{},
 				TokenDetails: TokenDetailsFactory{
 					AccessTokens:  accessTokenFactory,
@@ -142,6 +138,14 @@ func TestAuthService_ConfirmRegistration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustResetToken(now time.Time, user types.UserID, email string) string {
+	t, err := resetTokenFactory.Create(now, user, email)
+	if err != nil {
+		panic(fmt.Sprintf("creating reset token: %v", err))
+	}
+	return t
 }
 
 func TestAuthService_Login(t *testing.T) {

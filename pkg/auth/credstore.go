@@ -19,7 +19,7 @@ var ErrPasswordTooSimple = &pz.HTTPError{
 }
 
 type CredStore struct {
-	Users        types.UserStore
+	Users types.UserStore
 }
 
 func (cs *CredStore) Validate(creds *types.Credentials) error {

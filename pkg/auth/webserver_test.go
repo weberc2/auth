@@ -32,11 +32,7 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 		{
 			name: "simple",
 			body: confirmationForm(
-				must(resetTokenFactory.Create(
-					now,
-					"user",
-					"user@example.org",
-				)),
+				mustResetToken(now, "user", "user@example.org"),
 				goodPassword,
 			),
 			wantedStatus:   http.StatusSeeOther,
@@ -55,11 +51,7 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 		{
 			name: "missing password",
 			body: confirmationForm(
-				must(resetTokenFactory.Create(
-					now,
-					"user",
-					"user@example.org",
-				)),
+				mustResetToken(now, "user", "user@example.org"),
 				"", // password
 			),
 			wantedStatus: http.StatusBadRequest,
@@ -76,7 +68,7 @@ func TestWebServer_RegistrationConfirmationHandlerRoute(t *testing.T) {
 			}
 			webServer := WebServer{
 				AuthService: AuthService{
-					Creds: CredStore{ testCase.existingUsers },
+					Creds:       CredStore{testCase.existingUsers},
 					Tokens:      testsupport.TokenStoreFake{},
 					ResetTokens: resetTokenFactory,
 					TokenDetails: TokenDetailsFactory{
@@ -210,7 +202,7 @@ func TestWebServer_RegistrationHandlerRoute(t *testing.T) {
 			}
 			webServer := WebServer{
 				AuthService: AuthService{
-					Creds: CredStore{testCase.existingUsers},
+					Creds:       CredStore{testCase.existingUsers},
 					Tokens:      testsupport.TokenStoreFake{},
 					ResetTokens: resetTokenFactory,
 					TokenDetails: TokenDetailsFactory{
