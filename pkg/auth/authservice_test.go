@@ -18,7 +18,7 @@ import (
 type userStoreMock struct {
 	get    func(types.UserID) (*types.UserEntry, error)
 	upsert func(*types.UserEntry) error
-	create func(*types.UserEntry) error
+	insert func(*types.UserEntry) error
 }
 
 func (usm *userStoreMock) Get(u types.UserID) (*types.UserEntry, error) {
@@ -35,11 +35,11 @@ func (usm *userStoreMock) Upsert(entry *types.UserEntry) error {
 	return usm.upsert(entry)
 }
 
-func (usm *userStoreMock) Create(entry *types.UserEntry) error {
-	if usm.create == nil {
+func (usm *userStoreMock) Insert(entry *types.UserEntry) error {
+	if usm.insert == nil {
 		panic("userStoreMock: missing `create` hook")
 	}
-	return usm.create(entry)
+	return usm.insert(entry)
 }
 
 func TestAuthService_ConfirmRegistration(t *testing.T) {

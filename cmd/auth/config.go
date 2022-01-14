@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/weberc2/auth/pkg/auth"
 	"github.com/weberc2/auth/pkg/pgtokenstore"
+	"github.com/weberc2/auth/pkg/pguserstore"
 	pz "github.com/weberc2/httpeasy"
 	"gopkg.in/yaml.v2"
 )
@@ -127,6 +127,7 @@ func (c *Config) Run() error {
 	if err != nil {
 		return fmt.Errorf("creating AWS session: %w", err)
 	}
+
 	tokenStore, err := pgtokenstore.OpenEnv()
 	if err != nil {
 		return fmt.Errorf("opening token store database connection: %w", err)
@@ -135,13 +136,18 @@ func (c *Config) Run() error {
 		return fmt.Errorf("ensuring tokens table exists: %w", err)
 	}
 
+	userStore, err := pguserstore.OpenEnv()
+	if err != nil {
+		return fmt.Errorf("opening user store database connection: %w", err)
+	}
+	if err := userStore.EnsureTable(); err != nil {
+		return fmt.Errorf("ensuring users table exists: %w", err)
+	}
+
 	authService := auth.AuthHTTPService{
 		AuthService: auth.AuthService{
 			Tokens: tokenStore,
-			Creds: auth.CredStore{Users: &auth.DynamoDBUserStore{
-				Client: dynamodb.New(sess),
-				Table:  "Users",
-			}},
+			Creds:  auth.CredStore{Users: userStore},
 			Codes: auth.TokenFactory{
 				Issuer:        c.Issuer,
 				Audience:      c.Audience,

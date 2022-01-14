@@ -2,130 +2,61 @@ package pgtokenstore
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/lib/pq"
 	_ "github.com/lib/pq"
+	"github.com/weberc2/auth/pkg/pgutil"
 	"github.com/weberc2/auth/pkg/types"
 )
 
 type PGTokenStore sql.DB
 
 func OpenEnv() (*PGTokenStore, error) {
-	db, err := sql.Open(
-		"postgres",
-		fmt.Sprintf(
-			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-			getEnv("PG_HOST", "localhost"),
-			getEnv("PG_PORT", "5432"),
-			getEnv("PG_USER", "postgres"),
-			getEnv("PG_PASS", ""),
-			getEnv("PG_DB_NAME", "postgres"),
-			getEnv("PG_SSL_MODE", "disable"),
-		),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("opening postgres database: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("pinging postgres database: %w", err)
-	}
-
-	return (*PGTokenStore)(db), nil
-}
-
-func getEnv(env, def string) string {
-	x := os.Getenv(env)
-	if x == "" {
-		return def
-	}
-	return x
+	db, err := pgutil.OpenEnvPing()
+	return (*PGTokenStore)(db), err
 }
 
 func (pgts *PGTokenStore) EnsureTable() error {
-	if _, err := (*sql.DB)(pgts).Exec(
-		"CREATE TABLE IF NOT EXISTS tokens (" +
-			"token VARCHAR(9000) NOT NULL PRIMARY KEY, " +
-			"expires TIMESTAMP NOT NULL)",
-	); err != nil {
-		return fmt.Errorf("creating `tokens` postgres table: %w", err)
-	}
-	return nil
+	return table.Ensure((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) DropTable() error {
-	if _, err := (*sql.DB)(pgts).Exec(
-		"DROP TABLE IF EXISTS tokens",
-	); err != nil {
-		return fmt.Errorf("dropping table `tokens`: %w", err)
-	}
-	return nil
+	return table.Drop((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) ClearTable() error {
-	if _, err := (*sql.DB)(pgts).Exec("DELETE FROM tokens"); err != nil {
-		return fmt.Errorf("clearing `tokens` postgres table: %w", err)
-	}
-	return nil
+	return table.Clear((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) ResetTable() error {
-	if err := pgts.DropTable(); err != nil {
-		return err
-	}
-	return pgts.EnsureTable()
+	return table.Reset((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) Put(token string, expires time.Time) error {
-	if _, err := (*sql.DB)(pgts).Exec(
-		"INSERT INTO tokens (token, expires) VALUES($1, $2)",
-		token,
-		expires.Format(time.RFC3339),
-	); err != nil {
-		const errUniqueViolation = "23505"
-		if err, ok := err.(*pq.Error); ok && err.Code == errUniqueViolation {
-			return types.ErrTokenExists
-		}
-		return fmt.Errorf("inserting token into postgres: %w", err)
-	}
-	return nil
+	return table.Insert(
+		(*sql.DB)(pgts),
+		&tokenEntry{token, expires},
+		types.ErrTokenExists,
+	)
 }
 
 func (pgts *PGTokenStore) Exists(token string) error {
-	var dummy string
-	if err := (*sql.DB)(pgts).QueryRow(
-		"SELECT true FROM tokens WHERE token = $1",
-		token,
-	).Scan(&dummy); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = types.ErrTokenNotFound
-		}
-		return fmt.Errorf("checking for token in postgres: %w", err)
-	}
-	return nil
+	return table.Exists((*sql.DB)(pgts), token, types.ErrTokenNotFound)
 }
 
 func (pgts *PGTokenStore) Delete(token string) error {
-	if err := (*sql.DB)(pgts).QueryRow(
-		"DELETE FROM tokens WHERE token = $1 RETURNING token",
-		token,
-	).Scan(&token); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			err = types.ErrTokenNotFound
-		}
-		return fmt.Errorf("deleting token from postgres: %w", err)
-	}
-	return nil
+	return table.Delete((*sql.DB)(pgts), token, types.ErrTokenNotFound)
 }
 
 // DeleteExpired deletes all tokens that expired before `now`.
 func (pgts *PGTokenStore) DeleteExpired(now time.Time) error {
 	if _, err := (*sql.DB)(pgts).Exec(
-		"DELETE FROM tokens WHERE expires < $1",
+		fmt.Sprintf(
+			"DELETE FROM \"%s\" WHERE \"%s\" < $1",
+			table.Name,
+			columnExpires.Name,
+		),
 		now,
 	); err != nil {
 		return fmt.Errorf("deleting expired tokens from postgres: %w", err)
@@ -138,31 +69,58 @@ func (pgts *PGTokenStore) List() ([]types.Token, error) {
 	// to `null` instead of `[]`.
 	entries := []types.Token{}
 
-	rows, err := (*sql.DB)(pgts).Query("SELECT token, expires FROM tokens")
+	result, err := table.List((*sql.DB)(pgts))
 	if err != nil {
-		return nil, fmt.Errorf("querying tokens from postgres: %w", err)
+		return nil, fmt.Errorf("listing tokens: %w", err)
 	}
 
-	for rows.Next() {
-		var entry types.Token
-		var expiresString string
-		if err := rows.Scan(&entry.Token, &expiresString); err != nil {
-			return nil, fmt.Errorf("querying tokens from postgres: %w", err)
+	for result.Next() {
+		entries = append(entries, types.Token{})
+		if err := result.Scan(
+			(*tokenEntry)(&entries[len(entries)-1]),
+		); err != nil {
+			return nil, fmt.Errorf("listing tokens: %w", err)
 		}
-		exp, err := time.Parse(time.RFC3339, expiresString)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"querying tokens from postgres: parsing `expires` field: %w",
-				err,
-			)
-		}
-		entry.Expires = exp
-		entries = append(entries, entry)
 	}
 
 	return entries, err
 }
 
+type tokenEntry types.Token
+
+func (entry *tokenEntry) ID() interface{} { return entry.Token }
+
+func (entry *tokenEntry) Scan(pointers []interface{}) func() error {
+	var expires string
+	pointers[0] = &entry.Token
+	pointers[1] = &expires
+	return func() error {
+		exp, err := time.Parse(time.RFC3339, expires)
+		if err != nil {
+			return fmt.Errorf("parsing `expires` field: %w", err)
+		}
+		entry.Expires = exp
+		return nil
+	}
+}
+
+func (entry *tokenEntry) Values(values []interface{}) {
+	values[0] = entry.Token
+	values[1] = entry.Expires
+}
+
 var (
-	_ types.TokenStore = &PGTokenStore{}
+	_           types.TokenStore = &PGTokenStore{}
+	columnToken                  = pgutil.Column{
+		Name: "token",
+		Type: "VARCHAR(9000)",
+	}
+	columnExpires = pgutil.Column{
+		Name: "expires",
+		Type: "TIMESTAMP",
+	}
+	table = pgutil.Table{
+		Name:    "tokens",
+		Columns: []*pgutil.Column{&columnToken, &columnExpires},
+	}
 )

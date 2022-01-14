@@ -12,7 +12,7 @@ func TestCreate(t *testing.T) {
 
 	var entry *types.UserEntry
 	if err := (&CredStore{&userStoreMock{
-		create: func(e *types.UserEntry) error { entry = e; return nil },
+		insert: func(e *types.UserEntry) error { entry = e; return nil },
 	}}).Create(&types.Credentials{
 		User:     "user",
 		Email:    "user@example.org",

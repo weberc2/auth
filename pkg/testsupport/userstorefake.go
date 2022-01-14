@@ -11,7 +11,7 @@ func (usf UserStoreFake) Get(u types.UserID) (*types.UserEntry, error) {
 	return nil, types.ErrUserNotFound
 }
 
-func (usf UserStoreFake) Create(entry *types.UserEntry) error {
+func (usf UserStoreFake) Insert(entry *types.UserEntry) error {
 	usf[entry.User] = entry
 	return nil
 }

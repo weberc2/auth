@@ -78,7 +78,7 @@ func (cs *CredStore) Create(creds *types.Credentials) error {
 		return fmt.Errorf("creating credentials: %w", err)
 	}
 
-	if err := cs.Users.Create(entry); err != nil {
+	if err := cs.Users.Insert(entry); err != nil {
 		return fmt.Errorf("creating credentials: %w", err)
 	}
 	return nil
