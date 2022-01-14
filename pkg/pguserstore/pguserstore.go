@@ -40,6 +40,14 @@ func (pgus *PGUserStore) Upsert(user *types.UserEntry) error {
 	return table.Upsert((*sql.DB)(pgus), (*userEntry)(user))
 }
 
+func (pgus *PGUserStore) Get(user types.UserID) (*types.UserEntry, error) {
+	var entry userEntry
+	if err := table.Get((*sql.DB)(pgus), user, &entry); err != nil {
+		return nil, err
+	}
+	return (*types.UserEntry)(&entry), nil
+}
+
 func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
 	result, err := table.List((*sql.DB)(pgus))
 	if err != nil {
@@ -116,4 +124,7 @@ var (
 		ExistsErr:   types.ErrUserExists,
 		NotFoundErr: types.ErrUserNotFound,
 	}
+
+	// make sure this satisfies the `types.UserStore` interface
+	_ types.UserStore = (*PGUserStore)(nil)
 )

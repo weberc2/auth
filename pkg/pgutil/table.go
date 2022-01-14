@@ -115,6 +115,48 @@ const idColumnPosition = 0
 
 func (t *Table) IDColumn() *Column { return t.Columns[idColumnPosition] }
 
+func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
+	var columnNames strings.Builder
+	columnNames.WriteByte('"')
+	columnNames.WriteString(t.Columns[0].Name)
+	columnNames.WriteByte('"')
+
+	for _, column := range t.Columns[1:] {
+		columnNames.WriteByte(',')
+		columnNames.WriteByte(' ')
+		columnNames.WriteByte('"')
+		columnNames.WriteString(column.Name)
+		columnNames.WriteByte('"')
+	}
+
+	pointers := make([]interface{}, len(t.Columns))
+	finish := out.Scan(pointers)
+
+	if err := db.QueryRow(
+		fmt.Sprintf(
+			"SELECT %s FROM \"%s\" WHERE \"%s\" = $1",
+			columnNames.String(),
+			t.Name,
+			t.IDColumn().Name,
+		),
+	).Scan(pointers...); err != nil {
+		return fmt.Errorf(
+			"getting record from `%s` postgres table: %w",
+			t.Name,
+			err,
+		)
+	}
+	if err := finish(); err != nil {
+		return fmt.Errorf(
+			"getting record from `%s` postgres table: %w",
+			t.Name,
+			err,
+		)
+	}
+
+	return nil
+}
+
 func (t *Table) Exists(db *sql.DB, id interface{}) error {
 	var dummy string
 	if err := db.QueryRow(
