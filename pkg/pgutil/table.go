@@ -4,11 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
-	"strconv"
 	"strings"
-
-	"github.com/lib/pq"
 )
 
 // Column represents a Postgres table column.
@@ -63,6 +59,12 @@ type Table struct {
 	// at least one column, and the first column is assumed to be the primary
 	// key column.
 	Columns []*Column
+
+	// ExistsErr is returned when there is a primary key conflict error.
+	ExistsErr error
+
+	// NotFoundErr is returned when there a primary key can't be found.
+	NotFoundErr error
 }
 
 type Result struct {
@@ -109,9 +111,11 @@ func (t *Table) List(db *sql.DB) (*Result, error) {
 	}, nil
 }
 
-func (t *Table) IDColumn() *Column { return t.Columns[0] }
+const idColumnPosition = 0
 
-func (t *Table) Exists(db *sql.DB, id interface{}, notFoundErr error) error {
+func (t *Table) IDColumn() *Column { return t.Columns[idColumnPosition] }
+
+func (t *Table) Exists(db *sql.DB, id interface{}) error {
 	var dummy string
 	if err := db.QueryRow(
 		fmt.Sprintf("SELECT true FROM \"%s\" WHERE \"%s\" = $1",
@@ -121,14 +125,14 @@ func (t *Table) Exists(db *sql.DB, id interface{}, notFoundErr error) error {
 		id,
 	).Scan(&dummy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return notFoundErr
+			return t.NotFoundErr
 		}
 		return fmt.Errorf("checking for row in table `%s`: %w", t.Name, err)
 	}
 	return nil
 }
 
-func (t *Table) Delete(db *sql.DB, id interface{}, notFoundErr error) error {
+func (t *Table) Delete(db *sql.DB, id interface{}) error {
 	var dummy string
 	if err := db.QueryRow(
 		fmt.Sprintf(
@@ -140,125 +144,19 @@ func (t *Table) Delete(db *sql.DB, id interface{}, notFoundErr error) error {
 		id,
 	).Scan(&dummy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return notFoundErr
+			return t.NotFoundErr
 		}
 		return fmt.Errorf("deleting row from table `%s`: %w", t.Name, err)
 	}
 	return nil
 }
 
-func (t *Table) Insert(db *sql.DB, item Item, pkeyConstraintErr error) error {
-	return t.Inserter(pkeyConstraintErr).Insert(db, item)
+func (t *Table) Insert(db *sql.DB, item Item) error {
+	return t.inserter().insert(db, item)
 }
 
-type Inserter struct {
-	table             *Table
-	insertSQL         string
-	valuesBuffer      []interface{}
-	pkeyConstraintErr error
-}
-
-func (i *Inserter) Upsert(db *sql.DB, item Item) error {
-	var sb strings.Builder
-
-	// There's always at least 1 column.
-	if len(i.table.Columns) > 1 {
-		sb.WriteByte('"')
-		sb.WriteString(i.table.Columns[1].Name)
-		sb.WriteByte('"')
-		sb.WriteString("=$2")
-
-		for j, column := range i.table.Columns[2:] {
-			sb.WriteByte(',')
-			sb.WriteByte(' ')
-			sb.WriteByte('"')
-			sb.WriteString(column.Name)
-			sb.WriteByte('"')
-			sb.WriteByte('=')
-			sb.WriteByte('$')
-			sb.WriteString(strconv.Itoa(j + 3))
-		}
-	}
-
-	const idColumnPosition = 0
-	return i.helper(
-		db,
-		item,
-		fmt.Sprintf(
-			"%s ON CONFLICT (\"%s\") DO UPDATE SET %s WHERE \"%s\".\"%s\" = $%d",
-			i.insertSQL,
-			i.table.IDColumn().Name,
-			sb.String(),
-			i.table.Name,
-			i.table.IDColumn().Name,
-			idColumnPosition+1, // postgres placeholders are 1-indexed
-		),
-	)
-}
-
-func (i *Inserter) Insert(db *sql.DB, item Item) error {
-	return i.helper(db, item, i.insertSQL)
-}
-
-func (i *Inserter) helper(db *sql.DB, item Item, sql string) error {
-	log.Println("SQL:", sql)
-	item.Values(i.valuesBuffer)
-	if _, err := db.Exec(sql, i.valuesBuffer...); err != nil {
-		if err, ok := err.(*pq.Error); ok && err.Code == "23505" {
-			if fmt.Sprintf("%s_pkey", i.table.Name) == err.Constraint {
-				return i.pkeyConstraintErr
-			}
-			prefix := i.table.Name + "_"
-			suffix := "_key"
-			if strings.HasPrefix(err.Constraint, prefix) &&
-				strings.HasSuffix(err.Constraint, suffix) {
-				column := err.Constraint[len(prefix) : len(err.Constraint)-len(suffix)]
-				for _, c := range i.table.Columns {
-					if c.Name == column {
-						return c.Unique
-					}
-				}
-			}
-			return err
-		}
-		return fmt.Errorf(
-			"inserting row into postgres table `%s`: %w",
-			i.table.Name,
-			err,
-		)
-	}
-	return nil
-}
-
-func (t *Table) Inserter(pkeyConstraintErr error) *Inserter {
-	var columnNames, placeholders strings.Builder
-	columnNames.WriteByte('"')
-	columnNames.WriteString(t.Columns[0].Name)
-	columnNames.WriteByte('"')
-	placeholders.WriteString("$1")
-
-	for i := range t.Columns[1:] {
-		columnNames.WriteByte(',')
-		columnNames.WriteByte(' ')
-		columnNames.WriteByte('"')
-		columnNames.WriteString(t.Columns[i+1].Name)
-		columnNames.WriteByte('"')
-
-		placeholders.WriteByte(',')
-		placeholders.WriteByte(' ')
-		placeholders.WriteString(fmt.Sprintf("$%d", i+2))
-	}
-	return &Inserter{
-		table: t,
-		insertSQL: fmt.Sprintf(
-			"INSERT INTO \"%s\" (%s) VALUES(%s)",
-			t.Name,
-			columnNames.String(),
-			placeholders.String(),
-		),
-		valuesBuffer:      make([]interface{}, len(t.Columns)),
-		pkeyConstraintErr: pkeyConstraintErr,
-	}
+func (t *Table) Upsert(db *sql.DB, item Item) error {
+	return t.upserter().insert(db, item)
 }
 
 func (t *Table) Ensure(db *sql.DB) error {
@@ -284,14 +182,6 @@ func createColumnsSQL(columns []*Column, pkey string) string {
 		columns[i+1].createSQL(&sb, pkey)
 	}
 	return sb.String()
-}
-
-func createColumnSQL(sb *strings.Builder, c *Column) {
-	sb.WriteByte('"')
-	sb.WriteString(c.Name)
-	sb.WriteByte('"')
-	sb.WriteByte(' ')
-	sb.WriteString(c.Type)
 }
 
 func (t *Table) Drop(db *sql.DB) error {

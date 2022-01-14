@@ -34,19 +34,15 @@ func (pgts *PGTokenStore) ResetTable() error {
 }
 
 func (pgts *PGTokenStore) Put(token string, expires time.Time) error {
-	return table.Insert(
-		(*sql.DB)(pgts),
-		&tokenEntry{token, expires},
-		types.ErrTokenExists,
-	)
+	return table.Insert((*sql.DB)(pgts), &tokenEntry{token, expires})
 }
 
 func (pgts *PGTokenStore) Exists(token string) error {
-	return table.Exists((*sql.DB)(pgts), token, types.ErrTokenNotFound)
+	return table.Exists((*sql.DB)(pgts), token)
 }
 
 func (pgts *PGTokenStore) Delete(token string) error {
-	return table.Delete((*sql.DB)(pgts), token, types.ErrTokenNotFound)
+	return table.Delete((*sql.DB)(pgts), token)
 }
 
 // DeleteExpired deletes all tokens that expired before `now`.
@@ -110,17 +106,19 @@ func (entry *tokenEntry) Values(values []interface{}) {
 }
 
 var (
-	_           types.TokenStore = &PGTokenStore{}
-	columnToken                  = pgutil.Column{
-		Name: "token",
-		Type: "VARCHAR(9000)",
-	}
+	_ types.TokenStore = &PGTokenStore{}
+
 	columnExpires = pgutil.Column{
 		Name: "expires",
 		Type: "TIMESTAMP",
 	}
 	table = pgutil.Table{
-		Name:    "tokens",
-		Columns: []*pgutil.Column{&columnToken, &columnExpires},
+		Name: "tokens",
+		Columns: []*pgutil.Column{
+			{Name: "token", Type: "VARCHAR(9000)"},
+			&columnExpires,
+		},
+		ExistsErr:   types.ErrTokenExists,
+		NotFoundErr: types.ErrTokenNotFound,
 	}
 )

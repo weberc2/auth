@@ -33,13 +33,11 @@ func (pgus *PGUserStore) ResetTable() error {
 }
 
 func (pgus *PGUserStore) Insert(user *types.UserEntry) error {
-	return table.Inserter(types.ErrUserExists).
-		Insert((*sql.DB)(pgus), (*userEntry)(user))
+	return table.Insert((*sql.DB)(pgus), (*userEntry)(user))
 }
 
 func (pgus *PGUserStore) Upsert(user *types.UserEntry) error {
-	return table.Inserter(types.ErrUserExists).
-		Upsert((*sql.DB)(pgus), (*userEntry)(user))
+	return table.Upsert((*sql.DB)(pgus), (*userEntry)(user))
 }
 
 func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
@@ -61,7 +59,7 @@ func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
 }
 
 func (pgus *PGUserStore) Delete(user types.UserID) error {
-	return table.Delete((*sql.DB)(pgus), user, types.ErrUserNotFound)
+	return table.Delete((*sql.DB)(pgus), user)
 }
 
 // Implement `pgutil.Item` for `types.UserEntry`.
@@ -90,34 +88,32 @@ func (entry *userEntry) Scan(pointers []interface{}) func() error {
 func (entry *userEntry) ID() interface{} { return entry.User }
 
 var (
-	columnUser = pgutil.Column{
-		Name: "user",
-		Type: "VARCHAR(32)",
-		Null: false,
-	}
-	columnEmail = pgutil.Column{
-		Name:   "email",
-		Type:   "VARCHAR(128)",
-		Unique: types.ErrEmailExists,
-		Null:   false,
-	}
-	columnPWHash = pgutil.Column{
-		Name: "pwhash",
-		Type: "VARCHAR(255)",
-		Null: false,
-	}
-	columnCreated = pgutil.Column{
-		Name: "created",
-		Type: "TIMESTAMPTZ",
-		Null: false,
-	}
 	table = pgutil.Table{
 		Name: "users",
 		Columns: []*pgutil.Column{
-			&columnUser,
-			&columnEmail,
-			&columnPWHash,
-			&columnCreated,
+			{
+				Name: "user",
+				Type: "VARCHAR(32)",
+				Null: false,
+			},
+			{
+				Name:   "email",
+				Type:   "VARCHAR(128)",
+				Unique: types.ErrEmailExists,
+				Null:   false,
+			},
+			{
+				Name: "pwhash",
+				Type: "VARCHAR(255)",
+				Null: false,
+			},
+			{
+				Name: "created",
+				Type: "TIMESTAMPTZ",
+				Null: false,
+			},
 		},
+		ExistsErr:   types.ErrUserExists,
+		NotFoundErr: types.ErrUserNotFound,
 	}
 )
