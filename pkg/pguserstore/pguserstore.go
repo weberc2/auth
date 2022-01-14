@@ -98,7 +98,7 @@ func (entry *userEntry) ID() interface{} { return entry.User }
 var (
 	table = pgutil.Table{
 		Name: "users",
-		Columns: []*pgutil.Column{
+		Columns: []pgutil.Column{
 			{
 				Name: "user",
 				Type: "VARCHAR(32)",

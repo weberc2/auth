@@ -51,7 +51,7 @@ func (pgts *PGTokenStore) DeleteExpired(now time.Time) error {
 		fmt.Sprintf(
 			"DELETE FROM \"%s\" WHERE \"%s\" < $1",
 			table.Name,
-			columnExpires.Name,
+			table.Columns[columnExpires].Name,
 		),
 		now,
 	); err != nil {
@@ -105,18 +105,22 @@ func (entry *tokenEntry) Values(values []interface{}) {
 	values[1] = entry.Expires
 }
 
+const (
+	columnToken int = iota
+	columnExpires
+)
+
 var (
 	_ types.TokenStore = &PGTokenStore{}
 
-	columnExpires = pgutil.Column{
-		Name: "expires",
-		Type: "TIMESTAMP",
-	}
 	table = pgutil.Table{
 		Name: "tokens",
-		Columns: []*pgutil.Column{
-			{Name: "token", Type: "VARCHAR(9000)"},
-			&columnExpires,
+		Columns: []pgutil.Column{
+			columnToken: {Name: "token", Type: "VARCHAR(9000)"},
+			columnExpires: {
+				Name: "expires",
+				Type: "TIMESTAMP",
+			},
 		},
 		ExistsErr:   types.ErrTokenExists,
 		NotFoundErr: types.ErrTokenNotFound,

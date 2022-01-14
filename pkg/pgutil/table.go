@@ -58,7 +58,7 @@ type Table struct {
 	// Columns is the list of columns in the table. There must always be at
 	// at least one column, and the first column is assumed to be the primary
 	// key column.
-	Columns []*Column
+	Columns []Column
 
 	// ExistsErr is returned when there is a primary key conflict error.
 	ExistsErr error
@@ -113,7 +113,7 @@ func (t *Table) List(db *sql.DB) (*Result, error) {
 
 const idColumnPosition = 0
 
-func (t *Table) IDColumn() *Column { return t.Columns[idColumnPosition] }
+func (t *Table) IDColumn() *Column { return &t.Columns[idColumnPosition] }
 
 func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 	var columnNames strings.Builder
@@ -212,7 +212,7 @@ func (t *Table) Ensure(db *sql.DB) error {
 	return nil
 }
 
-func createColumnsSQL(columns []*Column, pkey string) string {
+func createColumnsSQL(columns []Column, pkey string) string {
 	if len(columns) < 1 {
 		return ""
 	}
