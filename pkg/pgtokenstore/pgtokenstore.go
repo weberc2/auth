@@ -86,18 +86,9 @@ type tokenEntry types.Token
 
 func (entry *tokenEntry) ID() interface{} { return entry.Token }
 
-func (entry *tokenEntry) Scan(pointers []interface{}) func() error {
-	var expires string
+func (entry *tokenEntry) Scan(pointers []interface{}) {
 	pointers[0] = &entry.Token
-	pointers[1] = &expires
-	return func() error {
-		exp, err := time.Parse(time.RFC3339, expires)
-		if err != nil {
-			return fmt.Errorf("parsing `expires` field: %w", err)
-		}
-		entry.Expires = exp
-		return nil
-	}
+	pointers[1] = &entry.Expires
 }
 
 func (entry *tokenEntry) Values(values []interface{}) {
@@ -119,7 +110,7 @@ var (
 			columnToken: {Name: "token", Type: "VARCHAR(9000)"},
 			columnExpires: {
 				Name: "expires",
-				Type: "TIMESTAMP",
+				Type: "TIMESTAMPTZ",
 			},
 		},
 		ExistsErr:   types.ErrTokenExists,

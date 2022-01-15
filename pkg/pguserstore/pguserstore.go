@@ -85,12 +85,11 @@ func (entry *userEntry) Values(values []interface{}) {
 	values[3] = &entry.Created
 }
 
-func (entry *userEntry) Scan(pointers []interface{}) func() error {
+func (entry *userEntry) Scan(pointers []interface{}) {
 	pointers[0] = &entry.User
 	pointers[1] = &entry.Email
 	pointers[2] = &entry.PasswordHash
 	pointers[3] = &entry.Created
-	return func() error { return nil }
 }
 
 func (entry *userEntry) ID() interface{} { return entry.User }

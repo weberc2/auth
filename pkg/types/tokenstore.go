@@ -40,7 +40,7 @@ func (wanted *Token) Compare(found *Token) error {
 		)
 	}
 
-	if wanted.Expires != found.Expires {
+	if !wanted.Expires.Equal(found.Expires) {
 		return fmt.Errorf(
 			"TokenEntry.Expires: wanted `%s`; found `%s`",
 			wanted.Expires,

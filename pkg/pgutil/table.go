@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Column represents a Postgres table column.
+// Column represents a SQL table column.
 type Column struct {
 	// Name is the name of the column.
 	Name string
@@ -51,6 +51,7 @@ func (c *Column) createSQL(sb *strings.Builder, pkey string) {
 	}
 }
 
+// Table represents a SQL table.
 type Table struct {
 	// Name is the name of the table.
 	Name string
@@ -67,21 +68,7 @@ type Table struct {
 	NotFoundErr error
 }
 
-type Result struct {
-	pointers []interface{}
-	rows     *sql.Rows
-}
-
-func (r *Result) Scan(item Item) error {
-	finish := item.Scan(r.pointers)
-	if err := r.rows.Scan(r.pointers...); err != nil {
-		return err
-	}
-	return finish()
-}
-
-func (r *Result) Next() bool { return r.rows.Next() }
-
+// List lists the records in the table.
 func (t *Table) List(db *sql.DB) (*Result, error) {
 	var sb strings.Builder
 	sb.WriteByte('"')
@@ -111,10 +98,13 @@ func (t *Table) List(db *sql.DB) (*Result, error) {
 	}, nil
 }
 
-const idColumnPosition = 0
-
+// IDColumn returns the tables primary key column.
 func (t *Table) IDColumn() *Column { return &t.Columns[idColumnPosition] }
 
+const idColumnPosition = 0
+
+// Get retrieves a single item by ID and scans it into the provided `out` item.
+// If the item isn't found, the table's `NotFoundErr` field will be returned.
 func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 	var columnNames strings.Builder
 	columnNames.WriteByte('"')
@@ -130,7 +120,7 @@ func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 	}
 
 	pointers := make([]interface{}, len(t.Columns))
-	finish := out.Scan(pointers)
+	out.Scan(pointers)
 
 	if err := db.QueryRow(
 		fmt.Sprintf(
@@ -150,17 +140,12 @@ func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 			err,
 		)
 	}
-	if err := finish(); err != nil {
-		return fmt.Errorf(
-			"getting record from `%s` postgres table: %w",
-			t.Name,
-			err,
-		)
-	}
 
 	return nil
 }
 
+// Exists returns `nil` if a record exists for the provided ID, otherwise it
+// returns the Table's `NotFoundErr` field.
 func (t *Table) Exists(db *sql.DB, id interface{}) error {
 	var dummy string
 	if err := db.QueryRow(
@@ -178,6 +163,8 @@ func (t *Table) Exists(db *sql.DB, id interface{}) error {
 	return nil
 }
 
+// Delete deletes the record with the provided ID, otherwise it returns the
+// Table's `NotFoundErr` field if no record exists with the provided ID.
 func (t *Table) Delete(db *sql.DB, id interface{}) error {
 	var dummy string
 	if err := db.QueryRow(
@@ -197,14 +184,24 @@ func (t *Table) Delete(db *sql.DB, id interface{}) error {
 	return nil
 }
 
+// Insert puts the provided item into the table. If a record already exists
+// with the same ID, the table's `ExistsErr` field will be returned. For UNIQUE
+// columns, if the provided item has a value which already exists, the column's
+// `Unique` field will be returned.
 func (t *Table) Insert(db *sql.DB, item Item) error {
 	return t.inserter().insert(db, item)
 }
 
+// Upsert puts the provided item into the table. If a record already exists
+// with the same ID, the existing record will be updated provided there are no
+// other constraint violations. For UNIQUE columns, if the provided item has a
+// value which already exists, the column's `Unique` field will be returned.
 func (t *Table) Upsert(db *sql.DB, item Item) error {
 	return t.upserter().insert(db, item)
 }
 
+// Ensure creates the table if it doesn't already exist. If the table already
+// exists but has a different schema, it will not be changed.
 func (t *Table) Ensure(db *sql.DB) error {
 	if _, err := db.Exec(fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS \"%s\" (%s)",
@@ -230,6 +227,7 @@ func createColumnsSQL(columns []Column, pkey string) string {
 	return sb.String()
 }
 
+// Drop drops the table.
 func (t *Table) Drop(db *sql.DB) error {
 	if _, err := db.Exec(fmt.Sprintf(
 		"DROP TABLE IF EXISTS \"%s\"",
@@ -240,6 +238,7 @@ func (t *Table) Drop(db *sql.DB) error {
 	return nil
 }
 
+// Clear truncates the table.
 func (t *Table) Clear(db *sql.DB) error {
 	if _, err := db.Exec(fmt.Sprintf(
 		"DELETE FROM \"%s\"",
@@ -250,6 +249,7 @@ func (t *Table) Clear(db *sql.DB) error {
 	return nil
 }
 
+// Reset drops the table if it exists and recreates it.
 func (t *Table) Reset(db *sql.DB) error {
 	if err := t.Drop(db); err != nil {
 		return err
@@ -257,8 +257,20 @@ func (t *Table) Reset(db *sql.DB) error {
 	return t.Ensure(db)
 }
 
+// Item represents a record in the table. It facilitates conversion between Go
+// types and SQL records.
 type Item interface {
+	// Values takes a buffer with one slot per column in the table and
+	// populates it *with values*. This is used for Insert and Upsert
+	// operations.
 	Values([]interface{})
-	Scan([]interface{}) func() error
+
+	// Scan takes a buffer with one slot per column in the table and populates
+	// it *with pointers* to data in the item. This is used for operations
+	// which retrieve data from the database.
+	Scan([]interface{})
+
+	// ID returns the value which corresponds to the table's primary key
+	// column.
 	ID() interface{}
 }

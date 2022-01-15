@@ -424,10 +424,9 @@ func (r *row) Values(values []interface{}) {
 	values[1] = r.email
 }
 
-func (r *row) Scan(pointers []interface{}) func() error {
+func (r *row) Scan(pointers []interface{}) {
 	pointers[0] = &r.id
 	pointers[1] = &r.email
-	return func() error { return nil }
 }
 
 func (r *row) ID() interface{} { return r.id }
