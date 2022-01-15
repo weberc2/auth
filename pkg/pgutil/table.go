@@ -139,7 +139,11 @@ func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 			t.Name,
 			t.IDColumn().Name,
 		),
+		id,
 	).Scan(pointers...); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return t.NotFoundErr
+		}
 		return fmt.Errorf(
 			"getting record from `%s` postgres table: %w",
 			t.Name,
