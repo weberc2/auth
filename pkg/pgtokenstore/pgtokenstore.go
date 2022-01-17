@@ -18,31 +18,31 @@ func OpenEnv() (*PGTokenStore, error) {
 }
 
 func (pgts *PGTokenStore) EnsureTable() error {
-	return table.Ensure((*sql.DB)(pgts))
+	return Table.Ensure((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) DropTable() error {
-	return table.Drop((*sql.DB)(pgts))
+	return Table.Drop((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) ClearTable() error {
-	return table.Clear((*sql.DB)(pgts))
+	return Table.Clear((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) ResetTable() error {
-	return table.Reset((*sql.DB)(pgts))
+	return Table.Reset((*sql.DB)(pgts))
 }
 
 func (pgts *PGTokenStore) Put(token string, expires time.Time) error {
-	return table.Insert((*sql.DB)(pgts), &tokenEntry{token, expires})
+	return Table.Insert((*sql.DB)(pgts), &tokenEntry{token, expires})
 }
 
 func (pgts *PGTokenStore) Exists(token string) error {
-	return table.Exists((*sql.DB)(pgts), token)
+	return Table.Exists((*sql.DB)(pgts), token)
 }
 
 func (pgts *PGTokenStore) Delete(token string) error {
-	return table.Delete((*sql.DB)(pgts), token)
+	return Table.Delete((*sql.DB)(pgts), token)
 }
 
 // DeleteExpired deletes all tokens that expired before `now`.
@@ -50,8 +50,8 @@ func (pgts *PGTokenStore) DeleteExpired(now time.Time) error {
 	if _, err := (*sql.DB)(pgts).Exec(
 		fmt.Sprintf(
 			"DELETE FROM \"%s\" WHERE \"%s\" < $1",
-			table.Name,
-			table.Columns[columnExpires].Name,
+			Table.Name,
+			Table.Columns[columnExpires].Name,
 		),
 		now,
 	); err != nil {
@@ -65,7 +65,7 @@ func (pgts *PGTokenStore) List() ([]types.Token, error) {
 	// to `null` instead of `[]`.
 	entries := []types.Token{}
 
-	result, err := table.List((*sql.DB)(pgts))
+	result, err := Table.List((*sql.DB)(pgts))
 	if err != nil {
 		return nil, fmt.Errorf("listing tokens: %w", err)
 	}
@@ -104,7 +104,7 @@ const (
 var (
 	_ types.TokenStore = &PGTokenStore{}
 
-	table = pgutil.Table{
+	Table = pgutil.Table{
 		Name: "tokens",
 		Columns: []pgutil.Column{
 			columnToken: {Name: "token", Type: "VARCHAR(9000)"},

@@ -2,9 +2,11 @@ package pgutil
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"testing"
 
+	"github.com/lib/pq"
 	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
 )
@@ -13,9 +15,9 @@ func TestTable_Upsert(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
 		table       Table
-		state       []row
-		input       *row
-		wantedState []row
+		state       []DynamicItem
+		input       DynamicItem
+		wantedState []DynamicItem
 		wantedErr   types.WantedError
 	}{
 		{
@@ -33,8 +35,13 @@ func TestTable_Upsert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			input:       &row{0, "user@example.org"},
-			wantedState: []row{{0, "user@example.org"}},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("user@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
 		},
 		{
 			name: "exists",
@@ -51,9 +58,16 @@ func TestTable_Upsert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			state:       []row{{0, "user@example.org"}},
-			input:       &row{0, "somethingelse@example.org"},
-			wantedState: []row{{0, "somethingelse@example.org"}},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("somethingelse@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("somethingelse@example.org")},
+			},
 		},
 		{
 			// given two distinct rows, if we try to update the value of a
@@ -74,16 +88,68 @@ func TestTable_Upsert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			state: []row{
-				{0, "user@example.org"},
-				{1, "user-1@example.org"},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+				{NewInteger(1), NewString("user-1@example.org")},
 			},
-			input: &row{1, "user@example.org"},
-			wantedState: []row{
-				{0, "user@example.org"},
-				{1, "user-1@example.org"},
+			input: DynamicItem{NewInteger(1), NewString("user@example.org")},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+				{NewInteger(1), NewString("user-1@example.org")},
 			},
 			wantedErr: types.ErrEmailExists,
+		},
+		{
+			name: "missing primary key column",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{nil, NewString("user@example.org")},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: types.WantedErrFunc(func(found error) error {
+				return assertMissingRequiredColumnErr("email", found)
+			}),
+		},
+		{
+			name: "missing not-null column",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{NewInteger(0), nil},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: types.WantedErrFunc(func(found error) error {
+				return assertMissingRequiredColumnErr("email", found)
+			}),
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -96,9 +162,8 @@ func TestTable_Upsert(t *testing.T) {
 				}
 			}()
 
-			inserter := testCase.table.inserter()
 			for i, row := range testCase.state {
-				if err := inserter.insert(db, &row); err != nil {
+				if err := testCase.table.Insert(db, &row); err != nil {
 					t.Fatalf(
 						"preparing test state: inserting row %d: %v",
 						i,
@@ -120,15 +185,38 @@ func TestTable_Upsert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			rows, err := resultToRows(result)
+			items, err := result.ToDynamicItems(
+				DynamicItemFactory(NilInteger, NilString),
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := compareRows(testCase.wantedState, rows); err != nil {
+			if err := CompareDynamicItems(testCase.wantedState, items); err != nil {
 				t.Fatal(err)
 			}
 		})
 	}
+}
+
+func assertMissingRequiredColumnErr(column string, found error) error {
+	var err *pq.Error
+	if errors.As(found, &err) {
+		if err.Code != "23502" {
+			return fmt.Errorf(
+				"pq.Error: wanted `23502` (column=%s); "+
+					"found `%s` (column=%s)",
+				column,
+				err.Code,
+				err.Column,
+			)
+		}
+		return nil
+	}
+	return fmt.Errorf(
+		"wanted `*pq.Error`; found `%T` (%v)",
+		found,
+		found,
+	)
 }
 
 func TestTable_Insert(t *testing.T) {
@@ -209,9 +297,8 @@ func TestTable_Insert(t *testing.T) {
 				}
 			}()
 
-			inserter := testCase.table.inserter()
 			for i, row := range testCase.state {
-				if err := inserter.insert(db, &row); err != nil {
+				if err := testCase.table.Insert(db, &row); err != nil {
 					t.Fatalf(
 						"preparing test state: inserting row %d: %v",
 						i,
@@ -295,9 +382,8 @@ func TestTable_Get(t *testing.T) {
 				t.Fatalf("unexpected error resetting test table: %v", err)
 			}
 
-			inserter := testCase.table.inserter()
 			for i, row := range testCase.state {
-				if err := inserter.insert(db, row); err != nil {
+				if err := testCase.table.Insert(db, row); err != nil {
 					t.Fatalf(
 						"preparing test state: inserting row %d: %v",
 						i,
@@ -379,9 +465,8 @@ func TestTable_Delete(t *testing.T) {
 				}
 			}()
 
-			inserter := testCase.table.inserter()
 			for i, row := range testCase.state {
-				if err := inserter.insert(db, &row); err != nil {
+				if err := testCase.table.Insert(db, &row); err != nil {
 					t.Fatalf(
 						"preparing test state: inserting row %d: %v",
 						i,

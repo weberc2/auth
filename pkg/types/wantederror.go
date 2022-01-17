@@ -14,3 +14,9 @@ func (NilError) CompareErr(other error) error {
 	}
 	return fmt.Errorf("wanted `nil`; found `%T`: %v", other, other)
 }
+
+type WantedErrFunc func(error) error
+
+func (wef WantedErrFunc) CompareErr(other error) error {
+	return wef(other)
+}

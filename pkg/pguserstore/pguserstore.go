@@ -23,23 +23,23 @@ func OpenEnv() (*PGUserStore, error) {
 // If any `users` table exists, this will return nil even if the schemas
 // mismatch.
 func (pgus *PGUserStore) EnsureTable() error {
-	return table.Ensure((*sql.DB)(pgus))
+	return Table.Ensure((*sql.DB)(pgus))
 }
 
 // DropTable drops the `users` Postgres table.
 func (pgus *PGUserStore) DropTable() error {
-	return table.Drop((*sql.DB)(pgus))
+	return Table.Drop((*sql.DB)(pgus))
 }
 
 // DropTable truncates the `users` Postgres table.
 func (pgus *PGUserStore) ClearTable() error {
-	return table.Clear((*sql.DB)(pgus))
+	return Table.Clear((*sql.DB)(pgus))
 }
 
 // ResetTable drops the `users` Postgres table if it exists and creates a new
 // one from scratch.
 func (pgus *PGUserStore) ResetTable() error {
-	return table.Reset((*sql.DB)(pgus))
+	return Table.Reset((*sql.DB)(pgus))
 }
 
 // Insert adds a record to the `users` Postgres table. If a record already
@@ -47,7 +47,7 @@ func (pgus *PGUserStore) ResetTable() error {
 // ID is novel, but the provided email already exists, `types.ErrEmailExists`
 // is returned.
 func (pgus *PGUserStore) Insert(user *types.UserEntry) error {
-	return table.Insert((*sql.DB)(pgus), (*userEntry)(user))
+	return Table.Insert((*sql.DB)(pgus), (*userEntry)(user))
 }
 
 // Insert adds a record to the `users` Postgres table. If a record already
@@ -55,14 +55,14 @@ func (pgus *PGUserStore) Insert(user *types.UserEntry) error {
 // constraint violations. If the provided ID is novel, but the provided email
 // already exists, `types.ErrEmailExists` is returned.
 func (pgus *PGUserStore) Upsert(user *types.UserEntry) error {
-	return table.Upsert((*sql.DB)(pgus), (*userEntry)(user))
+	return Table.Upsert((*sql.DB)(pgus), (*userEntry)(user))
 }
 
 // Get returns the record corresponding to the provided user ID. If no such
 // user ID exists, `types.ErrUserNotFound` is returned.
 func (pgus *PGUserStore) Get(user types.UserID) (*types.UserEntry, error) {
 	var entry userEntry
-	if err := table.Get((*sql.DB)(pgus), user, &entry); err != nil {
+	if err := Table.Get((*sql.DB)(pgus), user, &entry); err != nil {
 		return nil, err
 	}
 	return (*types.UserEntry)(&entry), nil
@@ -70,7 +70,7 @@ func (pgus *PGUserStore) Get(user types.UserID) (*types.UserEntry, error) {
 
 // List returns all records in the table.
 func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
-	result, err := table.List((*sql.DB)(pgus))
+	result, err := Table.List((*sql.DB)(pgus))
 	if err != nil {
 		return nil, fmt.Errorf("listing users: %w", err)
 	}
@@ -90,7 +90,7 @@ func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
 // Delete deletes a user from the table. If no user is found for the provided
 // user ID, then `types.ErrUserNotFound` is returned.
 func (pgus *PGUserStore) Delete(user types.UserID) error {
-	return table.Delete((*sql.DB)(pgus), user)
+	return Table.Delete((*sql.DB)(pgus), user)
 }
 
 // Implement `pgutil.Item` for `types.UserEntry`.
@@ -118,7 +118,7 @@ func (entry *userEntry) Scan(pointers []interface{}) {
 func (entry *userEntry) ID() interface{} { return entry.User }
 
 var (
-	table = pgutil.Table{
+	Table = pgutil.Table{
 		Name: "users",
 		Columns: []pgutil.Column{
 			{

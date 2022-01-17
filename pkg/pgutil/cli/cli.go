@@ -3,7 +3,6 @@ package cli
 import (
 	"database/sql"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -64,15 +63,15 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Description: "put an item into the postgres table",
 			Flags:       flags.insert,
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Insert(db, rowFromFlags(flags, ctx))
+				return table.Insert(db, itemFromFlags(flags, ctx))
 			}),
 		}, {
 			Name:        "upsert",
 			Aliases:     []string{"add", "create", "put"},
 			Description: "insert or update an item in the postgres table",
-			Flags:       flags.upsert,
+			Flags:       flags.insert,
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Upsert(db, rowFromFlags(flags, ctx))
+				return table.Upsert(db, itemFromFlags(flags, ctx))
 			}),
 		}, {
 			Name:        "get",
@@ -80,20 +79,17 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Description: "put an item into the postgres table",
 			Flags:       []cli.Flag{flags.id},
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				row := make(Row, len(flags.types))
-				for i, t := range flags.types {
-					row[i] = t.zero()
-				}
+				item := newDynamicItem(flags.types)
 				if err := table.Get(
 					db,
 					ctx.Generic(flags.idName),
-					row,
+					item,
 				); err != nil {
 					return err
 				}
 				tmp := make(map[string]interface{}, len(table.Columns))
 				for i, c := range table.Columns {
-					tmp[c.Name] = row[i]
+					tmp[c.Name] = item[i]
 				}
 				return jsonPrint(tmp)
 			}),
@@ -119,7 +115,9 @@ func New(table *pgutil.Table) (*cli.App, error) {
 				if err != nil {
 					return err
 				}
-				newRow, err := RowFuncFromColumns(table.Columns...)
+				newItem, err := pgutil.DynamicItemFactoryFromColumns(
+					table.Columns...,
+				)
 				if err != nil {
 					return err
 				}
@@ -129,36 +127,44 @@ func New(table *pgutil.Table) (*cli.App, error) {
 					columnNames[i] = c.Name
 				}
 
-				var rows []map[string]interface{}
+				var items []map[string]interface{}
 				for result.Next() {
-					row := newRow()
-					result.Scan(row)
-					rows = append(rows, rowToMap(columnNames, row))
+					item := newItem()
+					result.Scan(item)
+					items = append(items, itemToMap(columnNames, item))
 				}
-				return jsonPrint(rows)
+				return jsonPrint(items)
 			}),
 		}},
 	}, nil
 }
 
-func rowFromFlags(flags *flags, ctx *cli.Context) Row {
-	row := make(Row, len(flags.names))
-	for i := range flags.upsert {
-		row[i] = ctx.Generic(flags.names[i])
-		// as a special case, we have to convert `timeFlag` flag values from
-		// `tyme` back to `time.Time`. The former is necessary to implement the
-		// flag.Value interface, but the latter is necessary for SQL.
-		if _, ok := flags.upsert[i].(*timeFlag); ok {
-			row[i] = (*time.Time)(ctx.Generic(flags.names[i]).(*tyme))
+func itemFromFlags(flags *flags, ctx *cli.Context) pgutil.DynamicItem {
+	item := make(pgutil.DynamicItem, len(flags.names))
+	for i := range flags.insert {
+		switch flags.types[i] {
+		case flagTypeInteger:
+			item[i] = pgutil.NewInteger(ctx.Int(flags.names[i]))
+		case flagTypeString:
+			item[i] = pgutil.NewString(ctx.String(flags.names[i]))
+		case flagTypeTimestamp:
+			if t := ctx.Timestamp(flags.names[i]); t != nil {
+				item[i] = pgutil.NewTime(*t)
+			}
+		default:
+			panic(fmt.Sprintf("unsupported flag type: %d", flags.types[i]))
 		}
 	}
-	return row
+	return item
 }
 
-func rowToMap(headers []string, row Row) map[string]interface{} {
+func itemToMap(
+	headers []string,
+	item pgutil.DynamicItem,
+) map[string]interface{} {
 	m := make(map[string]interface{}, len(headers))
 	for i := range headers {
-		m[headers[i]] = row[i]
+		m[headers[i]] = item[i].Pointer()
 	}
 	return m
 }
@@ -194,17 +200,25 @@ func parseVarChar(s string) (int, error) {
 
 type flagType int
 
-func (ft flagType) zero() interface{} {
+func (ft flagType) zero() pgutil.Value {
 	switch ft {
 	case flagTypeInteger:
-		return new(int)
+		return pgutil.NilInteger()
 	case flagTypeString:
-		return new(string)
+		return pgutil.NilString()
 	case flagTypeTimestamp:
-		return new(time.Time)
+		return pgutil.NilTime()
 	default:
 		panic(fmt.Sprintf("invalid flagType: %d", ft))
 	}
+}
+
+func newDynamicItem(types []flagType) pgutil.DynamicItem {
+	item := make(pgutil.DynamicItem, len(types))
+	for i, t := range types {
+		item[i] = t.zero()
+	}
+	return item
 }
 
 const (
@@ -219,13 +233,11 @@ type flags struct {
 	names  []string
 	types  []flagType
 	insert []cli.Flag
-	upsert []cli.Flag
 }
 
 func tableFlags(t *pgutil.Table) (*flags, error) {
 	var (
 		insertFlags = make([]cli.Flag, len(t.Columns))
-		upsertFlags = make([]cli.Flag, len(t.Columns))
 		names       = make([]string, len(t.Columns))
 		types       = make([]flagType, len(t.Columns))
 		idColumn    = t.IDColumn()
@@ -238,7 +250,6 @@ func tableFlags(t *pgutil.Table) (*flags, error) {
 		}
 		flagName := slug.Make(c.Name)
 		insertFlags[i] = flagFunc(flagName, idColumn.Name == c.Name || !c.Null)
-		upsertFlags[i] = flagFunc(flagName, idColumn.Name == c.Name)
 		types[i] = flagType
 		names[i] = flagName
 	}
@@ -255,7 +266,6 @@ func tableFlags(t *pgutil.Table) (*flags, error) {
 		names:  names,
 		types:  types,
 		insert: insertFlags,
-		upsert: upsertFlags,
 	}, nil
 }
 
@@ -267,63 +277,8 @@ func stringFlag(name string, required bool) cli.Flag {
 	return &cli.StringFlag{Name: name, Required: required}
 }
 
-type timeFlag struct {
-	Name       string
-	Usage      string
-	Required   bool
-	HasBeenSet bool
-	Layout     string
-	Value      time.Time
-}
-
-func (tf *timeFlag) String() string {
-	return cli.FlagStringer(tf)
-}
-
-func (tf *timeFlag) IsRequired() bool { return tf.Required }
-
-func (tf *timeFlag) GetValue() string { return tf.Value.Format(time.RFC3339) }
-
-func (tf *timeFlag) GetUsage() string { return tf.Usage }
-
-func (tf *timeFlag) TakesValue() bool { return true }
-
-type tyme time.Time
-
-func (t *tyme) Scan(v interface{}) error {
-	switch x := v.(type) {
-	case string:
-		return t.Set(x)
-	case time.Time:
-		*t = tyme(x)
-		return nil
-	default:
-		return fmt.Errorf("unsupported time value: %v (%T)", v, v)
-	}
-}
-
-func (t *tyme) String() string { return (time.Time)(*t).Format(time.RFC3339) }
-
-func (t *tyme) Set(s string) error {
-	tv, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return err
-	}
-	*t = tyme(tv)
-	return nil
-}
-
-func (tf *timeFlag) Apply(fs *flag.FlagSet) error {
-	fs.Var((*tyme)(&tf.Value), tf.Name, tf.Usage)
-	return nil
-}
-
-func (tf *timeFlag) Names() []string { return []string{tf.Name} }
-
-func (tf *timeFlag) IsSet() bool { return tf.HasBeenSet }
-
 func timestampFlag(name string, required bool) cli.Flag {
-	return &timeFlag{
+	return &cli.TimestampFlag{
 		Name:     name,
 		Required: required,
 		Layout:   time.RFC3339,
