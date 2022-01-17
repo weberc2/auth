@@ -130,7 +130,9 @@ func New(table *pgutil.Table) (*cli.App, error) {
 				var items []map[string]interface{}
 				for result.Next() {
 					item := newItem()
-					result.Scan(item)
+					if err := result.Scan(item); err != nil {
+						return err
+					}
 					items = append(items, itemToMap(columnNames, item))
 				}
 				return jsonPrint(items)
