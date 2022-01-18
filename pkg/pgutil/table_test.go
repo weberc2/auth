@@ -11,6 +11,231 @@ import (
 	pz "github.com/weberc2/httpeasy"
 )
 
+func TestTable_Update(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		table       Table
+		state       []DynamicItem
+		input       DynamicItem
+		wantedState []DynamicItem
+		wantedErr   types.WantedError
+	}{
+		{
+			name: "simple",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("somethingelse@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("somethingelse@example.org")},
+			},
+		},
+		{
+			name: "some fields unchanged",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name: "email",
+					Type: "VARCHAR(255)",
+				}, {
+					Name: "age",
+					Type: "INTEGER",
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org"), NewInteger(10)},
+			},
+			input: DynamicItem{NewInteger(0), nil, NewInteger(25)},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org"), NewInteger(25)},
+			},
+		},
+		{
+			name: "not found",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("user@example.org"),
+			},
+			wantedErr: errRowNotFound,
+		},
+		{
+			// given two distinct rows, if we try to update the value of a
+			// UNIQUE column on one row to the same value as the other row,
+			// expect the column's `Unique` constraint violation error to be
+			// returned.
+			name: "unique constraint violation",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+				{NewInteger(1), NewString("user-1@example.org")},
+			},
+			input: DynamicItem{NewInteger(1), NewString("user@example.org")},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+				{NewInteger(1), NewString("user-1@example.org")},
+			},
+			wantedErr: types.ErrEmailExists,
+		},
+		{
+			name: "missing primary key column",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{nil, NewString("user@example.org")},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: types.WantedErrFunc(func(found error) error {
+				wanted := "update requires 2 columns; found 1: [email]"
+				if found.Error() != wanted {
+					t.Fatalf("wanted `%s`; found `%v`", wanted, found.Error())
+				}
+				return nil
+			}),
+		},
+		{
+			name: "missing not-null column",
+			table: Table{
+				Name: "rows",
+				Columns: []Column{{
+					Name: "id",
+					Type: "INTEGER",
+				}, {
+					Name:   "email",
+					Type:   "VARCHAR(255)",
+					Unique: types.ErrEmailExists,
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{NewInteger(0), nil},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: types.WantedErrFunc(func(found error) error {
+				wanted := "update requires 2 columns; found 1: [id]"
+				if found.Error() != wanted {
+					t.Fatalf("wanted `%s`; found `%v`", wanted, found.Error())
+				}
+				return nil
+			}),
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := testCase.table.Reset(db); err != nil {
+				t.Fatalf("unexpected error resetting test table: %v", err)
+			}
+			defer func() {
+				if err := testCase.table.Drop(db); err != nil {
+					t.Fatalf("failed to clean up after test case: %v", err)
+				}
+			}()
+
+			for i, row := range testCase.state {
+				if err := testCase.table.Insert(db, &row); err != nil {
+					t.Fatalf(
+						"preparing test state: inserting row %d: %v",
+						i,
+						err,
+					)
+				}
+			}
+
+			if testCase.wantedErr == nil {
+				testCase.wantedErr = types.NilError{}
+			}
+			if err := testCase.wantedErr.CompareErr(
+				testCase.table.Update(db, testCase.input),
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := testCase.table.List(db)
+			if err != nil {
+				t.Fatalf("unexpected error listing table rows: %v", err)
+			}
+			newItem, err := DynamicItemFactoryFromColumns(
+				testCase.table.Columns...,
+			)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error building DynamicItemFactory: %v",
+					err,
+				)
+			}
+			items, err := result.ToDynamicItems(newItem)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := CompareDynamicItems(testCase.wantedState, items); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestTable_Upsert(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string

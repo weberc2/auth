@@ -63,7 +63,10 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Description: "put an item into the postgres table",
 			Flags:       flags.insert,
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Insert(db, itemFromFlags(flags, ctx))
+				return table.Insert(
+					db,
+					itemFromFlags(flags, ctx, flags.insert),
+				)
 			}),
 		}, {
 			Name:        "upsert",
@@ -71,7 +74,10 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Description: "insert or update an item in the postgres table",
 			Flags:       flags.insert,
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Upsert(db, itemFromFlags(flags, ctx))
+				return table.Upsert(
+					db,
+					itemFromFlags(flags, ctx, flags.insert),
+				)
 			}),
 		}, {
 			Name:        "get",
@@ -137,13 +143,30 @@ func New(table *pgutil.Table) (*cli.App, error) {
 				}
 				return jsonPrint(items)
 			}),
+		}, {
+			Name:        "update",
+			Description: "update an item in the postgres table",
+			Flags:       flags.update,
+			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
+				return table.Update(
+					db,
+					itemFromFlags(flags, ctx, flags.update),
+				)
+			}),
 		}},
 	}, nil
 }
 
-func itemFromFlags(flags *flags, ctx *cli.Context) pgutil.DynamicItem {
+func itemFromFlags(
+	flags *flags,
+	ctx *cli.Context,
+	flagSet []cli.Flag,
+) pgutil.DynamicItem {
 	item := make(pgutil.DynamicItem, len(flags.names))
-	for i := range flags.insert {
+	for i := range flagSet {
+		if !ctx.IsSet(flags.names[i]) {
+			continue
+		}
 		switch flags.types[i] {
 		case flagTypeInteger:
 			item[i] = pgutil.NewInteger(ctx.Int(flags.names[i]))
@@ -235,11 +258,13 @@ type flags struct {
 	names  []string
 	types  []flagType
 	insert []cli.Flag
+	update []cli.Flag
 }
 
 func tableFlags(t *pgutil.Table) (*flags, error) {
 	var (
 		insertFlags = make([]cli.Flag, len(t.Columns))
+		updateFlags = make([]cli.Flag, len(t.Columns))
 		names       = make([]string, len(t.Columns))
 		types       = make([]flagType, len(t.Columns))
 		idColumn    = t.IDColumn()
@@ -252,6 +277,7 @@ func tableFlags(t *pgutil.Table) (*flags, error) {
 		}
 		flagName := slug.Make(c.Name)
 		insertFlags[i] = flagFunc(flagName, idColumn.Name == c.Name || !c.Null)
+		updateFlags[i] = flagFunc(flagName, idColumn.Name == c.Name)
 		types[i] = flagType
 		names[i] = flagName
 	}
@@ -268,6 +294,7 @@ func tableFlags(t *pgutil.Table) (*flags, error) {
 		names:  names,
 		types:  types,
 		insert: insertFlags,
+		update: updateFlags,
 	}, nil
 }
 
