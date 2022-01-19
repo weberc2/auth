@@ -4,21 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gosimple/slug"
 	"github.com/urfave/cli/v2"
 	"github.com/weberc2/auth/pkg/pgutil"
 )
 
+// New creates a new CLI app for a given `pgutil.Table` schema.
 func New(table *pgutil.Table) (*cli.App, error) {
-	flags, err := tableFlags(table)
-	if err != nil {
-		return nil, err
-	}
-
 	return &cli.App{
 		Name: table.Name,
 		Description: fmt.Sprintf(
@@ -61,36 +54,54 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Name:        "insert",
 			Aliases:     []string{"add", "create", "put"},
 			Description: "put an item into the postgres table",
-			Flags:       flags.insert,
+			Flags:       insertFlags(table),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Insert(
-					db,
-					itemFromFlags(flags, ctx, flags.insert),
-				)
+				item, err := itemFromFlags(table, ctx)
+				if err != nil {
+					return fmt.Errorf(
+						"building insertion item for table `%s`: %w",
+						table.Name,
+						err,
+					)
+				}
+				return table.Insert(db, item)
 			}),
 		}, {
 			Name:        "upsert",
 			Aliases:     []string{"add", "create", "put"},
 			Description: "insert or update an item in the postgres table",
-			Flags:       flags.insert,
+			Flags:       insertFlags(table),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Upsert(
-					db,
-					itemFromFlags(flags, ctx, flags.insert),
-				)
+				item, err := itemFromFlags(table, ctx)
+				if err != nil {
+					return fmt.Errorf(
+						"building insertion item for table `%s`: %w",
+						table.Name,
+						err,
+					)
+				}
+				return table.Upsert(db, item)
 			}),
 		}, {
 			Name:        "get",
 			Aliases:     []string{"fetch"},
 			Description: "put an item into the postgres table",
-			Flags:       []cli.Flag{flags.id},
+			Flags:       []cli.Flag{requiredColumnFlag(table.IDColumn())},
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item := newDynamicItem(flags.types)
-				if err := table.Get(
-					db,
-					ctx.Generic(flags.idName),
-					item,
-				); err != nil {
+				item, err := pgutil.EmptyDynamicItemFromColumns(table.Columns)
+				if err != nil {
+					return fmt.Errorf(
+						"building allocating return item for table `%s`: %w",
+						table.Name,
+						err,
+					)
+				}
+				idCol := table.IDColumn()
+				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
+				if err != nil {
+					return err
+				}
+				if err := table.Get(db, val, item); err != nil {
 					return err
 				}
 				tmp := make(map[string]interface{}, len(table.Columns))
@@ -103,12 +114,14 @@ func New(table *pgutil.Table) (*cli.App, error) {
 			Name:        "delete",
 			Aliases:     []string{"remove", "rm", "del", "drop"},
 			Description: "remove an item from the postgres table",
-			Flags:       []cli.Flag{flags.id},
+			Flags:       []cli.Flag{requiredColumnFlag(table.IDColumn())},
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				if err := table.Delete(
-					db,
-					ctx.Generic(flags.idName),
-				); err != nil {
+				idCol := table.IDColumn()
+				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
+				if err != nil {
+					return err
+				}
+				if err := table.Delete(db, val); err != nil {
 					return err
 				}
 				return nil
@@ -139,68 +152,27 @@ func New(table *pgutil.Table) (*cli.App, error) {
 					if err := result.Scan(item); err != nil {
 						return err
 					}
-					items = append(items, itemToMap(columnNames, item))
+					m := make(map[string]interface{}, len(columnNames))
+					for i := range columnNames {
+						m[columnNames[i]] = item[i].Pointer()
+					}
+					items = append(items, m)
 				}
 				return jsonPrint(items)
 			}),
 		}, {
 			Name:        "update",
 			Description: "update an item in the postgres table",
-			Flags:       flags.update,
+			Flags:       updateFlags(table),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				return table.Update(
-					db,
-					itemFromFlags(flags, ctx, flags.update),
-				)
+				item, err := itemFromFlags(table, ctx)
+				if err != nil {
+					return err
+				}
+				return table.Update(db, item)
 			}),
 		}},
 	}, nil
-}
-
-func itemFromFlags(
-	flags *flags,
-	ctx *cli.Context,
-	flagSet []cli.Flag,
-) pgutil.DynamicItem {
-	item := make(pgutil.DynamicItem, len(flags.names))
-	for i := range flagSet {
-		if !ctx.IsSet(flags.names[i]) {
-			continue
-		}
-		switch flags.types[i] {
-		case flagTypeInteger:
-			item[i] = pgutil.NewInteger(ctx.Int(flags.names[i]))
-		case flagTypeString:
-			item[i] = pgutil.NewString(ctx.String(flags.names[i]))
-		case flagTypeTimestamp:
-			if t := ctx.Timestamp(flags.names[i]); t != nil {
-				item[i] = pgutil.NewTime(*t)
-			}
-		default:
-			panic(fmt.Sprintf("unsupported flag type: %d", flags.types[i]))
-		}
-	}
-	return item
-}
-
-func itemToMap(
-	headers []string,
-	item pgutil.DynamicItem,
-) map[string]interface{} {
-	m := make(map[string]interface{}, len(headers))
-	for i := range headers {
-		m[headers[i]] = item[i].Pointer()
-	}
-	return m
-}
-
-func jsonPrint(v interface{}) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		panic(err)
-	}
-	_, err = fmt.Printf("%s\n", data)
-	return err
 }
 
 func withConn(f func(db *sql.DB, ctx *cli.Context) error) cli.ActionFunc {
@@ -214,118 +186,11 @@ func withConn(f func(db *sql.DB, ctx *cli.Context) error) cli.ActionFunc {
 	}
 }
 
-func parseVarChar(s string) (int, error) {
-	if strings.HasPrefix(s, "VARCHAR(") && s[len(s)-1] == ')' {
-		if i, err := strconv.Atoi(s[len("VARCHAR(") : len(s)-1]); err == nil {
-			return i, nil
-		}
-	}
-	return 0, fmt.Errorf("wanted `VARCHAR(<int>)`; found `%s`", s)
-}
-
-type flagType int
-
-func (ft flagType) zero() pgutil.Value {
-	switch ft {
-	case flagTypeInteger:
-		return pgutil.NilInteger()
-	case flagTypeString:
-		return pgutil.NilString()
-	case flagTypeTimestamp:
-		return pgutil.NilTime()
-	default:
-		panic(fmt.Sprintf("invalid flagType: %d", ft))
-	}
-}
-
-func newDynamicItem(types []flagType) pgutil.DynamicItem {
-	item := make(pgutil.DynamicItem, len(types))
-	for i, t := range types {
-		item[i] = t.zero()
-	}
-	return item
-}
-
-const (
-	flagTypeInteger flagType = iota
-	flagTypeString
-	flagTypeTimestamp
-)
-
-type flags struct {
-	id     cli.Flag
-	idName string
-	names  []string
-	types  []flagType
-	insert []cli.Flag
-	update []cli.Flag
-}
-
-func tableFlags(t *pgutil.Table) (*flags, error) {
-	var (
-		insertFlags = make([]cli.Flag, len(t.Columns))
-		updateFlags = make([]cli.Flag, len(t.Columns))
-		names       = make([]string, len(t.Columns))
-		types       = make([]flagType, len(t.Columns))
-		idColumn    = t.IDColumn()
-	)
-
-	for i, c := range t.Columns {
-		flagType, flagFunc, err := flagFunc(c.Type)
-		if err != nil {
-			return nil, fmt.Errorf("column `%s`: %w", c.Name, err)
-		}
-		flagName := slug.Make(c.Name)
-		insertFlags[i] = flagFunc(flagName, idColumn.Name == c.Name || !c.Null)
-		updateFlags[i] = flagFunc(flagName, idColumn.Name == c.Name)
-		types[i] = flagType
-		names[i] = flagName
-	}
-
-	_, idColumnFlagFunc, err := flagFunc(idColumn.Type)
+func jsonPrint(v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("column `%s`: %w", idColumn.Name, err)
+		panic(err)
 	}
-	idName := slug.Make(idColumn.Name)
-
-	return &flags{
-		id:     idColumnFlagFunc(idName, true),
-		idName: idName,
-		names:  names,
-		types:  types,
-		insert: insertFlags,
-		update: updateFlags,
-	}, nil
-}
-
-func intFlag(name string, required bool) cli.Flag {
-	return &cli.IntFlag{Name: name, Required: required}
-}
-
-func stringFlag(name string, required bool) cli.Flag {
-	return &cli.StringFlag{Name: name, Required: required}
-}
-
-func timestampFlag(name string, required bool) cli.Flag {
-	return &cli.TimestampFlag{
-		Name:     name,
-		Required: required,
-		Layout:   time.RFC3339,
-	}
-}
-
-func flagFunc(typ string) (flagType, func(string, bool) cli.Flag, error) {
-	switch typ {
-	case "TIMESTAMP", "TIMESTAMPTZ":
-		return flagTypeTimestamp, timestampFlag, nil
-	case "INTEGER":
-		return flagTypeInteger, intFlag, nil
-	case "TEXT":
-		return flagTypeString, stringFlag, nil
-	default:
-		if _, err := parseVarChar(typ); err == nil {
-			return flagTypeString, stringFlag, nil
-		}
-		return -1, nil, fmt.Errorf("unsupported column type: %s", typ)
-	}
+	_, err = fmt.Printf("%s\n", data)
+	return err
 }

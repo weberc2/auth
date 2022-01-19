@@ -14,6 +14,31 @@ type Value interface {
 	Value() interface{}
 }
 
+type ValueType int
+
+const (
+	ValueTypeInvalid ValueType = -1
+	ValueTypeString  ValueType = iota
+	ValueTypeInteger
+	ValueTypeTime
+)
+
+func ValueTypeFromColumnType(columnType string) (ValueType, error) {
+	switch columnType {
+	case "TEXT":
+		return ValueTypeString, nil
+	case "INTEGER":
+		return ValueTypeInteger, nil
+	case "TIMESTAMP", "TIMESTAMPTZ":
+		return ValueTypeTime, nil
+	default:
+		if _, err := parseVarChar(columnType); err == nil {
+			return ValueTypeString, nil
+		}
+		return ValueTypeInvalid, fmt.Errorf("unsupported column type: %s", columnType)
+	}
+}
+
 type String string
 
 func (s *String) Value() interface{} {
@@ -122,29 +147,45 @@ func DynamicItemFactory(values ...func() Value) func() DynamicItem {
 	}
 }
 
+func NilValueFuncFromColumnType(columnType string) (func() Value, error) {
+	valueType, err := ValueTypeFromColumnType(columnType)
+	if err != nil {
+		return nil, err
+	}
+	switch valueType {
+	case ValueTypeString:
+		return NilString, nil
+	case ValueTypeInteger:
+		return NilInteger, nil
+	case ValueTypeTime:
+		return NilTime, nil
+	default:
+		panic(fmt.Sprintf("invalid value type: %d", valueType))
+	}
+}
+
+func EmptyDynamicItemFromColumns(columns []Column) (DynamicItem, error) {
+	item := make(DynamicItem, len(columns))
+	for i, c := range columns {
+		f, err := NilValueFuncFromColumnType(c.Type)
+		if err != nil {
+			return nil, fmt.Errorf("column `%s`: %w", c.Name, err)
+		}
+		item[i] = f()
+	}
+	return item, nil
+}
+
 func DynamicItemFactoryFromColumns(
 	columns ...Column,
 ) (func() DynamicItem, error) {
 	valueFuncs := make([]func() Value, len(columns))
 	for i, c := range columns {
-		switch c.Type {
-		case "TEXT":
-			valueFuncs[i] = NilString
-		case "INTEGER":
-			valueFuncs[i] = NilInteger
-		case "TIMESTAMP", "TIMESTAMPTZ":
-			valueFuncs[i] = NilTime
-		default:
-			if _, err := parseVarChar(c.Type); err == nil {
-				valueFuncs[i] = NilString
-				continue
-			}
-			return nil, fmt.Errorf(
-				"column `%s`: unsupported column type: %s",
-				c.Name,
-				c.Type,
-			)
+		f, err := NilValueFuncFromColumnType(c.Type)
+		if err != nil {
+			return nil, fmt.Errorf("column `%s`: %w", c.Name, err)
 		}
+		valueFuncs[i] = f
 	}
 	return DynamicItemFactory(valueFuncs...), nil
 }
