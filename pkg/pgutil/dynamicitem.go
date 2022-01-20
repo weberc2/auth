@@ -35,7 +35,10 @@ func ValueTypeFromColumnType(columnType string) (ValueType, error) {
 		if _, err := parseVarChar(columnType); err == nil {
 			return ValueTypeString, nil
 		}
-		return ValueTypeInvalid, fmt.Errorf("unsupported column type: %s", columnType)
+		return ValueTypeInvalid, fmt.Errorf(
+			"unsupported column type: %s",
+			columnType,
+		)
 	}
 }
 
