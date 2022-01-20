@@ -11,138 +11,206 @@ import (
 )
 
 // New creates a new CLI app for a given `pgutil.Table` schema.
-func New(table *pgutil.Table) (*cli.App, error) {
+func New(t *pgutil.Table) (*cli.App, error) {
 	return &cli.App{
-		Name: table.Name,
+		Name: t.Name,
 		Description: fmt.Sprintf(
 			"a CLI for the `%s` Postgres table",
-			table.Name,
+			t.Name,
+		),
+		Usage: fmt.Sprintf(
+			"a CLI for the `%s` Postgres table",
+			t.Name,
 		),
 		Commands: []*cli.Command{{
-			Name:        "table",
-			Description: "commands for managing the Postgres table",
+			Name: "table",
+			Description: fmt.Sprintf(
+				"commands for managing the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"commands for managing the `%s` table",
+				t.Name,
+			),
 			Subcommands: []*cli.Command{{
-				Name:        "ensure",
-				Aliases:     []string{"make", "create"},
-				Description: "create the postgres table if it doesn't exist",
+				Name:    "ensure",
+				Aliases: []string{"make", "create"},
+				Description: fmt.Sprintf(
+					"create the `%s` table if it doesn't exist",
+					t.Name,
+				),
+				Usage: fmt.Sprintf(
+					"create the `%s` table if it doesn't exist",
+					t.Name,
+				),
 				Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-					return table.Ensure(db)
+					return t.Ensure(db)
 				}),
 			}, {
 				Name:        "drop",
 				Aliases:     []string{"delete", "destroy"},
-				Description: "drop the postgres table",
+				Description: fmt.Sprintf("drop the `%s` table", t.Name),
+				Usage:       fmt.Sprintf("drop the `%s` table", t.Name),
 				Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-					return table.Drop(db)
+					return t.Drop(db)
 				}),
 			}, {
-				Name:        "clear",
-				Aliases:     []string{"truncate", "trunc"},
-				Description: "truncate the postgres table",
+				Name:    "clear",
+				Aliases: []string{"truncate", "trunc"},
+				Description: fmt.Sprintf(
+					"truncate the `%s` table",
+					t.Name,
+				),
+				Usage: fmt.Sprintf(
+					"truncate the `%s` table",
+					t.Name,
+				),
 				Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-					return table.Clear(db)
+					return t.Clear(db)
 				}),
 			}, {
-				Name:        "reset",
-				Aliases:     []string{"recreate"},
-				Description: "drop and recreate the postgres table",
+				Name:    "reset",
+				Aliases: []string{"recreate"},
+				Description: fmt.Sprintf(
+					"drop and recreate the `%s` table",
+					t.Name,
+				),
+				Usage: fmt.Sprintf(
+					"drop and recreate the `%s` table",
+					t.Name,
+				),
 				Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-					return table.Reset(db)
+					return t.Reset(db)
 				}),
 			}},
 		}, {
-			Name:        "insert",
-			Aliases:     []string{"add", "create", "put"},
-			Description: "put an item into the postgres table",
-			Flags:       insertFlags(table),
+			Name:    "insert",
+			Aliases: []string{"add", "create", "put"},
+			Description: fmt.Sprintf(
+				"put an item into the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"put an item into the `%s` table",
+				t.Name,
+			),
+			Flags: insertFlags(t),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item, err := itemFromFlags(table, ctx)
+				item, err := itemFromFlags(t, ctx)
 				if err != nil {
 					return fmt.Errorf(
 						"building insertion item for table `%s`: %w",
-						table.Name,
+						t.Name,
 						err,
 					)
 				}
-				return table.Insert(db, item)
+				return t.Insert(db, item)
 			}),
 		}, {
-			Name:        "upsert",
-			Aliases:     []string{"add", "create", "put"},
-			Description: "insert or update an item in the postgres table",
-			Flags:       insertFlags(table),
+			Name:    "upsert",
+			Aliases: []string{"add", "create", "put"},
+			Description: fmt.Sprintf(
+				"insert or update an item in the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"insert or update an item in the `%s` table",
+				t.Name,
+			),
+			Flags: insertFlags(t),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item, err := itemFromFlags(table, ctx)
+				item, err := itemFromFlags(t, ctx)
 				if err != nil {
 					return fmt.Errorf(
 						"building insertion item for table `%s`: %w",
-						table.Name,
+						t.Name,
 						err,
 					)
 				}
-				return table.Upsert(db, item)
+				return t.Upsert(db, item)
 			}),
 		}, {
-			Name:        "get",
-			Aliases:     []string{"fetch"},
-			Description: "put an item into the postgres table",
-			Flags:       []cli.Flag{requiredColumnFlag(table.IDColumn())},
+			Name:    "get",
+			Aliases: []string{"fetch"},
+			Description: fmt.Sprintf(
+				"put an item into the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"put an item into the `%s` table",
+				t.Name,
+			),
+			Flags: []cli.Flag{requiredColumnFlag(t.IDColumn())},
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item, err := pgutil.EmptyDynamicItemFromColumns(table.Columns)
+				item, err := pgutil.EmptyDynamicItemFromColumns(t.Columns)
 				if err != nil {
 					return fmt.Errorf(
 						"building allocating return item for table `%s`: %w",
-						table.Name,
+						t.Name,
 						err,
 					)
 				}
-				idCol := table.IDColumn()
+				idCol := t.IDColumn()
 				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
 				if err != nil {
 					return err
 				}
-				if err := table.Get(db, val, item); err != nil {
+				if err := t.Get(db, val, item); err != nil {
 					return err
 				}
-				tmp := make(map[string]interface{}, len(table.Columns))
-				for i, c := range table.Columns {
+				tmp := make(map[string]interface{}, len(t.Columns))
+				for i, c := range t.Columns {
 					tmp[c.Name] = item[i]
 				}
 				return jsonPrint(tmp)
 			}),
 		}, {
-			Name:        "delete",
-			Aliases:     []string{"remove", "rm", "del", "drop"},
-			Description: "remove an item from the postgres table",
-			Flags:       []cli.Flag{requiredColumnFlag(table.IDColumn())},
+			Name:    "delete",
+			Aliases: []string{"remove", "rm", "del", "drop"},
+			Description: fmt.Sprintf(
+				"remove an item from the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"remove an item from the `%s` table",
+				t.Name,
+			),
+			Flags: []cli.Flag{requiredColumnFlag(t.IDColumn())},
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				idCol := table.IDColumn()
+				idCol := t.IDColumn()
 				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
 				if err != nil {
 					return err
 				}
-				if err := table.Delete(db, val); err != nil {
+				if err := t.Delete(db, val); err != nil {
 					return err
 				}
 				return nil
 			}),
 		}, {
-			Name:        "list",
-			Description: "list all items in the postgres table",
+			Name: "list",
+			Description: fmt.Sprintf(
+				"list all items in the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"list all items in the `%s` table",
+				t.Name,
+			),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				result, err := table.List(db)
+				result, err := t.List(db)
 				if err != nil {
 					return err
 				}
 				newItem, err := pgutil.DynamicItemFactoryFromColumns(
-					table.Columns...,
+					t.Columns...,
 				)
 				if err != nil {
 					return err
 				}
 
-				columnNames := make([]string, len(table.Columns))
-				for i, c := range table.Columns {
+				columnNames := make([]string, len(t.Columns))
+				for i, c := range t.Columns {
 					columnNames[i] = c.Name
 				}
 
@@ -161,15 +229,22 @@ func New(table *pgutil.Table) (*cli.App, error) {
 				return jsonPrint(items)
 			}),
 		}, {
-			Name:        "update",
-			Description: "update an item in the postgres table",
-			Flags:       updateFlags(table),
+			Name: "update",
+			Description: fmt.Sprintf(
+				"update an item in the `%s` table",
+				t.Name,
+			),
+			Usage: fmt.Sprintf(
+				"update an item in the `%s` table",
+				t.Name,
+			),
+			Flags: updateFlags(t),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item, err := itemFromFlags(table, ctx)
+				item, err := itemFromFlags(t, ctx)
 				if err != nil {
 					return err
 				}
-				return table.Update(db, item)
+				return t.Update(db, item)
 			}),
 		}},
 	}, nil
