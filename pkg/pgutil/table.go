@@ -203,6 +203,8 @@ func (t *Table) Upsert(db *sql.DB, item Item) error {
 	return insert(db, t, upsertSQL, item)
 }
 
+// Update updates a row in a table. If the row isn't found, the table's
+// `NotFoundErr` field is returned.
 func (t *Table) Update(db *sql.DB, item Item) error {
 	return update(db, t, item)
 }

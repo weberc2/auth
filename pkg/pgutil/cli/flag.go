@@ -2,10 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/gosimple/slug"
 	"github.com/urfave/cli/v2"
 	"github.com/weberc2/auth/pkg/pgutil"
-	"time"
 )
 
 func insertFlags(t *pgutil.Table) []cli.Flag {
@@ -62,7 +63,7 @@ func newFlag(columnType string, flag string, required bool) (cli.Flag, error) {
 func requiredColumnFlag(c *pgutil.Column) cli.Flag {
 	f, err := newFlag(c.Type, slug.Make(c.Name), true)
 	if err != nil {
-		panic(fmt.Sprintf("column `%s`: %w", c.Name, err))
+		panic(fmt.Sprintf("column `%s`: %v", c.Name, err))
 	}
 	return f
 }

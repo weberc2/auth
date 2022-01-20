@@ -8,6 +8,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// OpenEnv opens a database connection based on environment variables,
+// `PG_HOST`, `PG_PORT`, `PG_USER`, `PG_PASS`, `PG_DB_NAME`, and `PG_SSL_MODE`.
+// These environment variables have default values, `localhost`, `5432`,
+// `postgres`, <empty string>, `postgres`, and `disable`, respectively.
 func OpenEnv() (*sql.DB, error) {
 	db, err := sql.Open(
 		"postgres",
@@ -27,6 +31,9 @@ func OpenEnv() (*sql.DB, error) {
 	return db, nil
 }
 
+// OpenEnvPing opens a database connection based on environment variables (per
+// `OpenEnv`) *and* it pings the database, returning an error if the connection
+// doesn't work.
 func OpenEnvPing() (*sql.DB, error) {
 	db, err := OpenEnv()
 	if err != nil {
