@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/gosimple/slug"
 	"github.com/urfave/cli/v2"
 	"github.com/weberc2/auth/pkg/pgutil"
 )
@@ -140,9 +139,9 @@ func New(t *pgutil.Table) (*cli.App, error) {
 				"put an item into the `%s` table",
 				t.Name,
 			),
-			Flags: []cli.Flag{requiredColumnFlag(t.IDColumn())},
+			Flags: requiredColumnFlags(t.PrimaryKeys),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				item, err := pgutil.EmptyDynamicItemFromColumns(t.Columns)
+				result, err := pgutil.EmptyDynamicItemFromTable(t)
 				if err != nil {
 					return fmt.Errorf(
 						"building allocating return item for table `%s`: %w",
@@ -150,17 +149,17 @@ func New(t *pgutil.Table) (*cli.App, error) {
 						err,
 					)
 				}
-				idCol := t.IDColumn()
-				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
+				id, err := itemFromFlags(t, ctx)
 				if err != nil {
 					return err
 				}
-				if err := t.Get(db, val, item); err != nil {
+				if err := t.Get(db, id, result); err != nil {
 					return err
 				}
-				tmp := make(map[string]interface{}, len(t.Columns))
-				for i, c := range t.Columns {
-					tmp[c.Name] = item[i]
+				columns := t.Columns()
+				tmp := make(map[string]interface{}, len(columns))
+				for i, c := range columns {
+					tmp[c.Name] = result[i]
 				}
 				return jsonPrint(tmp)
 			}),
@@ -175,14 +174,13 @@ func New(t *pgutil.Table) (*cli.App, error) {
 				"remove an item from the `%s` table",
 				t.Name,
 			),
-			Flags: []cli.Flag{requiredColumnFlag(t.IDColumn())},
+			Flags: requiredColumnFlags(t.PrimaryKeys),
 			Action: withConn(func(db *sql.DB, ctx *cli.Context) error {
-				idCol := t.IDColumn()
-				val, err := flagValue(idCol.Type, ctx, slug.Make(idCol.Name))
+				id, err := itemFromFlags(t, ctx)
 				if err != nil {
 					return err
 				}
-				if err := t.Delete(db, val); err != nil {
+				if err := t.Delete(db, id); err != nil {
 					return err
 				}
 				return nil
@@ -202,15 +200,14 @@ func New(t *pgutil.Table) (*cli.App, error) {
 				if err != nil {
 					return err
 				}
-				newItem, err := pgutil.DynamicItemFactoryFromColumns(
-					t.Columns...,
-				)
+				newItem, err := pgutil.DynamicItemFactoryFromTable(t)
 				if err != nil {
 					return err
 				}
 
-				columnNames := make([]string, len(t.Columns))
-				for i, c := range t.Columns {
+				columns := t.Columns()
+				columnNames := make([]string, len(columns))
+				for i, c := range columns {
 					columnNames[i] = c.Name
 				}
 

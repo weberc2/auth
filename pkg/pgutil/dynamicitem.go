@@ -229,11 +229,12 @@ func NilValueFuncFromColumnType(columnType string) (func() Value, error) {
 	}
 }
 
-// EmptyDynamicItemFromColumns takes a list of columns and generates an "empty"
-// item whose values are "typed-nil"s (the types of the nil values corresponds
-// to the column types). If any of the column types aren't supported, an error
-// is returned.
-func EmptyDynamicItemFromColumns(columns []Column) (DynamicItem, error) {
+// EmptyDynamicItemFromTable takes a table and generates an "empty" item whose
+// values are "typed-nil"s (the types of the nil values corresponds to the
+// column types). If any of the column types aren't supported, an error is
+// returned.
+func EmptyDynamicItemFromTable(table *Table) (DynamicItem, error) {
+	columns := table.Columns()
 	item := make(DynamicItem, len(columns))
 	for i, c := range columns {
 		f, err := NilValueFuncFromColumnType(c.Type)
@@ -245,13 +246,12 @@ func EmptyDynamicItemFromColumns(columns []Column) (DynamicItem, error) {
 	return item, nil
 }
 
-// DynamicItemFactoryFromColumns returns a DynamicItem factory function based
-// on a list of columns. See `DynamicItemFactory` for details about factory
-// functions. See `NilValueFuncFromColumnType` for details about how column
-// types are matched to value types, see `ValueTypeFromColumnType`.
-func DynamicItemFactoryFromColumns(
-	columns ...Column,
-) (func() DynamicItem, error) {
+// DynamicItemFactoryFromTable returns a DynamicItem factory function based on
+// a table. See `DynamicItemFactory` for details about factory functions. See
+// `NilValueFuncFromColumnType` for details about how column types are matched
+// to value types, see `ValueTypeFromColumnType`.
+func DynamicItemFactoryFromTable(table *Table) (func() DynamicItem, error) {
+	columns := table.Columns()
 	valueFuncs := make([]func() Value, len(columns))
 	for i, c := range columns {
 		f, err := NilValueFuncFromColumnType(c.Type)
@@ -293,9 +293,6 @@ func (di DynamicItem) Values(values []interface{}) {
 		}
 	}
 }
-
-// Scan implements the `pgutil.Item` interface's `ID()` method.
-func (di DynamicItem) ID() interface{} { return di[idColumnPosition] }
 
 // Compare compares two `DynamicItem`s. If the items differ in length, type, or
 // value, an error is returned. Otherwise, `nil`.

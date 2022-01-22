@@ -2,11 +2,9 @@ package pgutil
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/lib/pq"
 	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
 )
@@ -23,11 +21,9 @@ func TestTable_Update(t *testing.T) {
 		{
 			name: "simple",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -49,13 +45,12 @@ func TestTable_Update(t *testing.T) {
 		{
 			name: "some fields unchanged",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name: "email",
 					Type: "VARCHAR(255)",
+					Null: true,
 				}, {
 					Name: "age",
 					Type: "INTEGER",
@@ -74,11 +69,9 @@ func TestTable_Update(t *testing.T) {
 		{
 			name: "not found",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -99,11 +92,9 @@ func TestTable_Update(t *testing.T) {
 			// returned.
 			name: "unique constraint violation",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -125,11 +116,9 @@ func TestTable_Update(t *testing.T) {
 		{
 			name: "missing primary key column",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -145,7 +134,8 @@ func TestTable_Update(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				wanted := "update requires 2 columns; found 1: [email]"
+				wanted := "building `update` SQL: nil value found for " +
+					"primary key column `id`"
 				if found.Error() != wanted {
 					t.Fatalf("wanted `%s`; found `%v`", wanted, found.Error())
 				}
@@ -155,11 +145,9 @@ func TestTable_Update(t *testing.T) {
 		{
 			name: "missing not-null column",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -175,7 +163,8 @@ func TestTable_Update(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				wanted := "update requires 2 columns; found 1: [id]"
+				wanted := "building `update` SQL: nil value found for NOT " +
+					"NULL column `email`"
 				if found.Error() != wanted {
 					t.Fatalf("wanted `%s`; found `%v`", wanted, found.Error())
 				}
@@ -216,9 +205,7 @@ func TestTable_Update(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			newItem, err := DynamicItemFactoryFromColumns(
-				testCase.table.Columns...,
-			)
+			newItem, err := DynamicItemFactoryFromTable(&testCase.table)
 			if err != nil {
 				t.Fatalf(
 					"unexpected error building DynamicItemFactory: %v",
@@ -248,11 +235,9 @@ func TestTable_Upsert(t *testing.T) {
 		{
 			name: "simple",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -271,11 +256,9 @@ func TestTable_Upsert(t *testing.T) {
 		{
 			name: "exists",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -301,11 +284,9 @@ func TestTable_Upsert(t *testing.T) {
 			// returned.
 			name: "unique constraint violation",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -327,11 +308,9 @@ func TestTable_Upsert(t *testing.T) {
 		{
 			name: "missing primary key column",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -347,17 +326,20 @@ func TestTable_Upsert(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				return assertMissingRequiredColumnErr("email", found)
+				wanted := "building `insert` SQL: nil value found for " +
+					"primary key column `id`"
+				if found.Error() != wanted {
+					return fmt.Errorf("wanted `%s`; found `%s`", wanted, found.Error())
+				}
+				return nil
 			}),
 		},
 		{
 			name: "missing not-null column",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -373,7 +355,12 @@ func TestTable_Upsert(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				return assertMissingRequiredColumnErr("email", found)
+				wanted := "building `insert` SQL: nil value found for NOT " +
+					"NULL column `email`"
+				if found.Error() != wanted {
+					return fmt.Errorf("wanted `%s`; found `%s`", wanted, found.Error())
+				}
+				return nil
 			}),
 		},
 	} {
@@ -423,27 +410,6 @@ func TestTable_Upsert(t *testing.T) {
 	}
 }
 
-func assertMissingRequiredColumnErr(column string, found error) error {
-	var err *pq.Error
-	if errors.As(found, &err) {
-		if err.Code != "23502" {
-			return fmt.Errorf(
-				"pq.Error: wanted `23502` (column=%s); "+
-					"found `%s` (column=%s)",
-				column,
-				err.Code,
-				err.Column,
-			)
-		}
-		return nil
-	}
-	return fmt.Errorf(
-		"wanted `*pq.Error`; found `%T` (%v)",
-		found,
-		found,
-	)
-}
-
 func TestTable_Insert(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
@@ -456,11 +422,9 @@ func TestTable_Insert(t *testing.T) {
 		{
 			name: "simple",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -474,11 +438,9 @@ func TestTable_Insert(t *testing.T) {
 		{
 			name: "exists",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -494,11 +456,9 @@ func TestTable_Insert(t *testing.T) {
 		{
 			name: "unique constraint violation",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -568,11 +528,9 @@ func TestTable_Get(t *testing.T) {
 		{
 			name: "exists",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -587,11 +545,9 @@ func TestTable_Get(t *testing.T) {
 		{
 			name: "not found",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -622,7 +578,7 @@ func TestTable_Get(t *testing.T) {
 			}
 			var found row
 			if err := testCase.wantedErr.CompareErr(
-				testCase.table.Get(db, testCase.input, &found),
+				testCase.table.Get(db, &row{id: testCase.input}, &found),
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -646,11 +602,9 @@ func TestTable_Delete(t *testing.T) {
 		{
 			name: "simple",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -664,11 +618,9 @@ func TestTable_Delete(t *testing.T) {
 		{
 			name: "not found",
 			table: Table{
-				Name: "rows",
-				Columns: []Column{{
-					Name: "id",
-					Type: "INTEGER",
-				}, {
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
 					Name:   "email",
 					Type:   "VARCHAR(255)",
 					Unique: types.ErrEmailExists,
@@ -704,7 +656,7 @@ func TestTable_Delete(t *testing.T) {
 				testCase.wantedErr = types.NilError{}
 			}
 			if err := testCase.wantedErr.CompareErr(
-				testCase.table.Delete(db, testCase.input),
+				testCase.table.Delete(db, &row{id: testCase.input}),
 			); err != nil {
 				t.Fatal(err)
 			}

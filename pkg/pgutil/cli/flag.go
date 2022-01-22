@@ -10,14 +10,10 @@ import (
 )
 
 func insertFlags(t *pgutil.Table) []cli.Flag {
-	out := make([]cli.Flag, len(t.Columns))
-	idCol := t.IDColumn().Name
-	for i, c := range t.Columns {
-		flag, err := newFlag(
-			c.Type,
-			slug.Make(c.Name),
-			idCol == c.Name || !c.Null,
-		)
+	columns := t.Columns()
+	out := make([]cli.Flag, len(columns))
+	for i, c := range columns {
+		flag, err := newFlag(c.Type, slug.Make(c.Name), true)
 		if err != nil {
 			panic(fmt.Errorf("column `%s`: %w", c.Name, err))
 		}
@@ -27,10 +23,10 @@ func insertFlags(t *pgutil.Table) []cli.Flag {
 }
 
 func updateFlags(t *pgutil.Table) []cli.Flag {
-	out := make([]cli.Flag, len(t.Columns))
-	idCol := t.IDColumn().Name
-	for i, c := range t.Columns {
-		flag, err := newFlag(c.Type, slug.Make(c.Name), idCol == c.Name)
+	columns := t.Columns()
+	out := make([]cli.Flag, len(columns))
+	for i, c := range columns {
+		flag, err := newFlag(c.Type, slug.Make(c.Name), true)
 		if err != nil {
 			panic(fmt.Errorf("column `%s`: %w", c.Name, err))
 		}
@@ -60,20 +56,25 @@ func newFlag(columnType string, flag string, required bool) (cli.Flag, error) {
 	}
 }
 
-func requiredColumnFlag(c *pgutil.Column) cli.Flag {
-	f, err := newFlag(c.Type, slug.Make(c.Name), true)
-	if err != nil {
-		panic(fmt.Sprintf("column `%s`: %v", c.Name, err))
+func requiredColumnFlags(columns []pgutil.Column) []cli.Flag {
+	out := make([]cli.Flag, len(columns))
+	for i, c := range columns {
+		f, err := newFlag(c.Type, slug.Make(c.Name), true)
+		if err != nil {
+			panic(fmt.Sprintf("column `%s`: %v", c.Name, err))
+		}
+		out[i] = f
 	}
-	return f
+	return out
 }
 
 func itemFromFlags(
 	t *pgutil.Table,
 	ctx *cli.Context,
 ) (pgutil.DynamicItem, error) {
-	item := make(pgutil.DynamicItem, len(t.Columns))
-	for i, c := range t.Columns {
+	columns := t.Columns()
+	item := make(pgutil.DynamicItem, len(columns))
+	for i, c := range columns {
 		value, err := flagValue(c.Type, ctx, slug.Make(c.Name))
 		if err != nil {
 			return nil, fmt.Errorf("column `%s`: %w", c.Name, err)

@@ -28,11 +28,9 @@ type Column struct {
 	Type string
 }
 
-func (c *Column) createSQL(sb *strings.Builder, pkey string) {
+func (c *Column) createSQL(sb *strings.Builder) {
 	// name
-	sb.WriteByte('"')
-	sb.WriteString(c.Name)
-	sb.WriteByte('"')
+	c.nameSQL(sb)
 	sb.WriteByte(' ')
 
 	// type
@@ -47,10 +45,42 @@ func (c *Column) createSQL(sb *strings.Builder, pkey string) {
 	if c.Unique != nil {
 		sb.WriteString(" UNIQUE")
 	}
+}
 
-	// primary key
-	if pkey == c.Name {
-		sb.WriteString(" PRIMARY KEY")
+func (c *Column) nameSQL(sb *strings.Builder) {
+	sb.WriteByte('"')
+	sb.WriteString(c.Name)
+	sb.WriteByte('"')
+}
+
+func columnPredicate(
+	sb *strings.Builder,
+	table string,
+	c *Column,
+	placeholder int,
+) {
+	// write table name
+	sb.WriteByte('"')
+	sb.WriteString(table)
+	sb.WriteByte('"')
+	sb.WriteByte('.')
+
+	c.nameSQL(sb)
+	sb.WriteByte('=')
+	sb.WriteByte('$')
+	sb.WriteString(strconv.Itoa(placeholder))
+}
+
+func columnsPredicate(
+	sb *strings.Builder,
+	table string,
+	head *Column,
+	tail ...Column,
+) {
+	columnPredicate(sb, table, head, 1)
+	for i := range tail {
+		sb.WriteString(" AND ")
+		columnPredicate(sb, table, &tail[i], i+1)
 	}
 }
 
@@ -59,10 +89,15 @@ type Table struct {
 	// Name is the name of the table.
 	Name string
 
-	// Columns is the list of columns in the table. There must always be at
-	// at least one column, and the first column is assumed to be the primary
-	// key column.
-	Columns []Column
+	// PrimaryKeys are the primary key columns. These should not overlap with
+	// columns defined in the `Columns` field. If there is more than one column
+	// defined in this field, then the table's primary key is a composite key.
+	PrimaryKeys []Column
+
+	// OtherColumns is the list of non-primary-key columns in the table. None
+	// of the columns defined in this field should be defined in the
+	// `PrimaryKeys` field or vice-versa.
+	OtherColumns []Column
 
 	// ExistsErr is returned when there is a primary key conflict error.
 	ExistsErr error
@@ -74,17 +109,7 @@ type Table struct {
 // List lists the records in the table.
 func (t *Table) List(db *sql.DB) (*Result, error) {
 	var sb strings.Builder
-	sb.WriteByte('"')
-	sb.WriteString(t.Columns[0].Name)
-	sb.WriteByte('"')
-
-	for i := range t.Columns[1:] {
-		sb.WriteByte(',')
-		sb.WriteByte(' ')
-		sb.WriteByte('"')
-		sb.WriteString(t.Columns[i+1].Name)
-		sb.WriteByte('"')
-	}
+	t.columnNames(&sb)
 
 	rows, err := db.Query(fmt.Sprintf(
 		"SELECT %s FROM \"%s\"",
@@ -95,45 +120,25 @@ func (t *Table) List(db *sql.DB) (*Result, error) {
 		return nil, fmt.Errorf("listing rows from table `%s`: %w", t.Name, err)
 	}
 
-	return &Result{
-		rows:     rows,
-		pointers: make([]interface{}, len(t.Columns)),
-	}, nil
+	return &Result{rows: rows, pointers: t.buffer()}, nil
 }
-
-// IDColumn returns the tables primary key column.
-func (t *Table) IDColumn() *Column { return &t.Columns[idColumnPosition] }
-
-const idColumnPosition = 0
 
 // Get retrieves a single item by ID and scans it into the provided `out` item.
 // If the item isn't found, the table's `NotFoundErr` field will be returned.
-func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
-	var columnNames strings.Builder
-	columnNames.WriteByte('"')
-	columnNames.WriteString(t.Columns[0].Name)
-	columnNames.WriteByte('"')
-
-	for _, column := range t.Columns[1:] {
-		columnNames.WriteByte(',')
-		columnNames.WriteByte(' ')
-		columnNames.WriteByte('"')
-		columnNames.WriteString(column.Name)
-		columnNames.WriteByte('"')
-	}
-
-	pointers := make([]interface{}, len(t.Columns))
-	out.Scan(pointers)
+func (t *Table) Get(db *sql.DB, id, out Item) error {
+	var columnNames, predicate strings.Builder
+	t.columnNames(&columnNames)
+	t.primaryKeysPredicate(&predicate)
 
 	if err := db.QueryRow(
 		fmt.Sprintf(
-			"SELECT %s FROM \"%s\" WHERE \"%s\" = $1",
+			"SELECT %s FROM \"%s\" WHERE %s",
 			columnNames.String(),
 			t.Name,
-			t.IDColumn().Name,
+			predicate.String(),
 		),
-		id,
-	).Scan(pointers...); err != nil {
+		t.primaryKeys(id)...,
+	).Scan(t.pointers(out)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return t.NotFoundErr
 		}
@@ -147,16 +152,35 @@ func (t *Table) Get(db *sql.DB, id interface{}, out Item) error {
 	return nil
 }
 
+func (t *Table) pointers(item Item) []interface{} {
+	buf := t.buffer()
+	item.Scan(buf)
+	return buf
+}
+
+func (t *Table) Columns() []Column {
+	return append(t.PrimaryKeys, t.OtherColumns...)
+}
+
+func (t *Table) buffer() []interface{} {
+	return make([]interface{}, len(t.PrimaryKeys)+len(t.OtherColumns))
+}
+
+func (t *Table) primaryKeys(item Item) []interface{} {
+	buf := t.buffer()
+	item.Values(buf)
+	return buf[:len(t.PrimaryKeys)]
+}
+
 // Exists returns `nil` if a record exists for the provided ID, otherwise it
 // returns the Table's `NotFoundErr` field.
-func (t *Table) Exists(db *sql.DB, id interface{}) error {
+func (t *Table) Exists(db *sql.DB, item Item) error {
 	var dummy string
+	var sb strings.Builder
+	t.primaryKeysPredicate(&sb)
 	if err := db.QueryRow(
-		fmt.Sprintf("SELECT true FROM \"%s\" WHERE \"%s\" = $1",
-			t.Name,
-			t.IDColumn().Name,
-		),
-		id,
+		fmt.Sprintf("SELECT true FROM \"%s\" WHERE %s", t.Name, sb.String()),
+		t.primaryKeys(item)...,
 	).Scan(&dummy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return t.NotFoundErr
@@ -168,16 +192,19 @@ func (t *Table) Exists(db *sql.DB, id interface{}) error {
 
 // Delete deletes the record with the provided ID, otherwise it returns the
 // Table's `NotFoundErr` field if no record exists with the provided ID.
-func (t *Table) Delete(db *sql.DB, id interface{}) error {
+func (t *Table) Delete(db *sql.DB, id Item) error {
+	var names, predicate strings.Builder
+	t.primaryKeysPredicate(&predicate)
+	t.primaryKeysNames(&names)
 	var dummy string
 	if err := db.QueryRow(
 		fmt.Sprintf(
-			"DELETE FROM \"%s\" WHERE \"%s\" = $1 RETURNING \"%s\"",
+			"DELETE FROM \"%s\" WHERE %s RETURNING %s",
 			t.Name,
-			t.IDColumn().Name,
-			t.IDColumn().Name,
+			predicate.String(),
+			names.String(),
 		),
-		id,
+		t.primaryKeys(id)...,
 	).Scan(&dummy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return t.NotFoundErr
@@ -187,12 +214,38 @@ func (t *Table) Delete(db *sql.DB, id interface{}) error {
 	return nil
 }
 
+func (t *Table) primaryKeysNames(sb *strings.Builder) {
+	columnsNames(sb, &t.PrimaryKeys[0], t.PrimaryKeys[1:]...)
+}
+
+func (t *Table) primaryKeysPredicate(sb *strings.Builder) {
+	columnsPredicate(sb, t.Name, &t.PrimaryKeys[0], t.PrimaryKeys[1:]...)
+}
+
+func (t *Table) columnNames(sb *strings.Builder) {
+	columnsNames(
+		sb,
+		&t.PrimaryKeys[0],
+		append(t.PrimaryKeys[1:], t.OtherColumns...)...,
+	)
+}
+
+func columnsNames(sb *strings.Builder, head *Column, tail ...Column) {
+	head.nameSQL(sb)
+
+	for i := range tail {
+		sb.WriteByte(',')
+		sb.WriteByte(' ')
+		tail[i].nameSQL(sb)
+	}
+}
+
 // Insert puts the provided item into the table. If a record already exists
 // with the same ID, the table's `ExistsErr` field will be returned. For UNIQUE
 // columns, if the provided item has a value which already exists, the column's
 // `Unique` field will be returned.
 func (t *Table) Insert(db *sql.DB, item Item) error {
-	return insert(db, t, insertSQL, item)
+	return insert(db, t, (*Table).insertSQL, item)
 }
 
 // Upsert puts the provided item into the table. If a record already exists
@@ -200,7 +253,7 @@ func (t *Table) Insert(db *sql.DB, item Item) error {
 // other constraint violations. For UNIQUE columns, if the provided item has a
 // value which already exists, the column's `Unique` field will be returned.
 func (t *Table) Upsert(db *sql.DB, item Item) error {
-	return insert(db, t, upsertSQL, item)
+	return insert(db, t, (*Table).upsertSQL, item)
 }
 
 // Update updates a row in a table. If the row isn't found, the table's
@@ -209,42 +262,30 @@ func (t *Table) Update(db *sql.DB, item Item) error {
 	return update(db, t, item)
 }
 
-func updateSQL(t *Table, columns []string) string {
+func (t *Table) updateSQL(columns []Column) string {
+	if len(columns) < 1 {
+		return ""
+	}
+
 	// There must be an ID column in position 0 and at least one other column
 	// to set because neither `UPDATE <table> SET WHERE <idColumn>=<id>` nor
 	// `UPDATE <table> WHERE <idColumn>=<id>` are valid SQL.
-	if len(columns) > 1 {
-		setList := setListSQL(columns)
-		idc := t.IDColumn().Name
-		return fmt.Sprintf(
-			"UPDATE \"%s\" SET %s WHERE \"%s\"=$1 RETURNING \"%s\"",
-			t.Name,
-			setList,
-			idc,
-			idc,
-		)
-	}
-	return ""
+	var predicate, names strings.Builder
+	t.primaryKeysPredicate(&predicate)
+	t.primaryKeysNames(&names)
+	return fmt.Sprintf(
+		"UPDATE \"%s\" SET %s WHERE %s RETURNING %s",
+		t.Name,
+		t.setListSQL(columns),
+		predicate.String(),
+		names.String(),
+	)
 }
 
-func insertSQL(t *Table, columns []string) string {
+func (t *Table) insertSQL() string {
 	var columnNames, placeholders strings.Builder
-	columnNames.WriteByte('"')
-	columnNames.WriteString(columns[0])
-	columnNames.WriteByte('"')
-	placeholders.WriteString("$1")
-
-	for i := range columns[1:] {
-		columnNames.WriteByte(',')
-		columnNames.WriteByte(' ')
-		columnNames.WriteByte('"')
-		columnNames.WriteString(columns[i+1])
-		columnNames.WriteByte('"')
-
-		placeholders.WriteByte(',')
-		placeholders.WriteByte(' ')
-		placeholders.WriteString(fmt.Sprintf("$%d", i+2))
-	}
+	t.columnNames(&columnNames)
+	t.placeholders(&placeholders)
 
 	return fmt.Sprintf(
 		"INSERT INTO \"%s\" (%s) VALUES(%s)",
@@ -254,20 +295,27 @@ func insertSQL(t *Table, columns []string) string {
 	)
 }
 
+func (t *Table) placeholders(sb *strings.Builder) {
+	sb.WriteString("$1")
+
+	for i := 1; i < len(t.PrimaryKeys)+len(t.OtherColumns); i++ {
+		sb.WriteByte(',')
+		sb.WriteByte(' ')
+		sb.WriteByte('$')
+		sb.WriteString(strconv.Itoa(i + 1))
+	}
+}
+
 func update(
 	db *sql.DB,
 	table *Table,
 	item Item,
 ) error {
-	columns, values := table.columnsAndValues(item)
-	if len(columns) < 2 {
-		return fmt.Errorf(
-			"update requires 2 columns; found %d: %v",
-			len(columns),
-			columns,
-		)
+	columns, values, err := table.columnsAndValues(item)
+	if err != nil {
+		return fmt.Errorf("building `update` SQL: %w", err)
 	}
-	rows, err := db.Query(updateSQL(table, columns), values...)
+	rows, err := db.Query(table.updateSQL(columns), values...)
 	if err != nil {
 		return fmt.Errorf(
 			"inserting row into postgres table `%s`: %w",
@@ -288,12 +336,14 @@ func update(
 func insert(
 	db *sql.DB,
 	table *Table,
-	sqlFunc func(*Table, []string) string,
+	sqlFunc func(*Table) string,
 	item Item,
 ) error {
-	columns, values := table.columnsAndValues(item)
-	sql := sqlFunc(table, columns)
-	if _, err := db.Exec(sql, values...); err != nil {
+	_, values, err := table.columnsAndValues(item)
+	if err != nil {
+		return fmt.Errorf("building `insert` SQL: %w", err)
+	}
+	if _, err := db.Exec(sqlFunc(table), values...); err != nil {
 		return fmt.Errorf(
 			"inserting row into postgres table `%s`: %w",
 			table.Name,
@@ -313,7 +363,7 @@ func handleErr(table *Table, err error) error {
 		if strings.HasPrefix(err.Constraint, prefix) &&
 			strings.HasSuffix(err.Constraint, suffix) {
 			column := err.Constraint[len(prefix) : len(err.Constraint)-len(suffix)]
-			for _, c := range table.Columns {
+			for _, c := range table.OtherColumns {
 				if c.Name == column {
 					return c.Unique
 				}
@@ -323,69 +373,72 @@ func handleErr(table *Table, err error) error {
 	return err
 }
 
-func (t *Table) columnsAndValues(item Item) ([]string, []interface{}) {
-	buf := make([]interface{}, len(t.Columns))
+func (t *Table) columnsAndValues(item Item) ([]Column, []interface{}, error) {
+	buf := t.buffer()
 	item.Values(buf)
-	var columnNames []string
-	var nonNilValues []interface{}
+	var (
+		columns      []Column
+		nonNilValues = buf[:len(t.PrimaryKeys)]
+	)
 
-	for i := range buf {
-		if buf[i] != nil {
-			columnNames = append(columnNames, t.Columns[i].Name)
-			nonNilValues = append(nonNilValues, buf[i])
-			continue
+	for i, v := range nonNilValues {
+		if v == nil {
+			return nil, nil, fmt.Errorf(
+				"nil value found for primary key column `%s`",
+				t.PrimaryKeys[i].Name,
+			)
 		}
 	}
-	return columnNames, nonNilValues
+
+	optional := buf[len(t.PrimaryKeys):]
+	for i := range optional {
+		if optional[i] != nil {
+			columns = append(columns, t.OtherColumns[i])
+			nonNilValues = append(nonNilValues, optional[i])
+			continue
+		}
+		if !t.OtherColumns[i].Null {
+			return nil, nil, fmt.Errorf(
+				"nil value found for NOT NULL column `%s`",
+				t.OtherColumns[i].Name,
+			)
+		}
+	}
+	return columns, nonNilValues, nil
 }
 
-func upsertSQL(t *Table, columns []string) string {
+func (t *Table) upsertSQL() string {
 	// build the SET list (the list of "<COLUMN>"=<value> pairs following the
 	// SET keyword)
-	//
-	// there's always at least 1 column--the ID column (at position 0). we
-	// don't change that column value, so we ignore it in the SET list.
-	if len(columns) > 1 {
-		setList := setListSQL(columns)
-		idc := t.IDColumn().Name
-		return fmt.Sprintf(
-			"%s ON CONFLICT (\"%s\") DO UPDATE SET %s WHERE \"%s\".\"%s\" = $%d",
-			insertSQL(t, columns),
-			idc,
-			setList,
-			t.Name,
-			idc,
-			idColumnPosition+1, // postgres placeholders are 1-indexed
-		)
-	}
+	var pkeys, predicate strings.Builder
+	t.primaryKeysNames(&pkeys)
+	t.primaryKeysPredicate(&predicate)
 	return fmt.Sprintf(
-		"%s ON CONFLICT (\"%s\") DO NOTHING",
-		insertSQL(t, columns),
-		t.IDColumn().Name,
+		"%s ON CONFLICT (%s) DO UPDATE SET %s WHERE %s",
+		t.insertSQL(),
+		pkeys.String(),
+		t.setListSQL(t.OtherColumns),
+		predicate.String(),
 	)
 }
 
 // build the SET list (the list of "<COLUMN>"=<value> pairs following the SET
 // keyword)
-//
-// there's always at least 1 column in the table--the ID column (at position
-// 0). we don't change that column value, so we ignore it in the SET list.
-func setListSQL(columns []string) string {
+func (t *Table) setListSQL(columns []Column) string {
 	var sb strings.Builder
-	sb.WriteByte('"')
-	sb.WriteString(columns[1])
-	sb.WriteByte('"')
-	sb.WriteString("=$2")
+	columns[0].nameSQL(&sb)
+	sb.WriteByte('=')
+	sb.WriteByte('$')
+	sb.WriteString(strconv.Itoa(len(t.PrimaryKeys) + 1))
 
-	for i, column := range columns[2:] {
+	tail := columns[1:]
+	for i := range tail {
 		sb.WriteByte(',')
 		sb.WriteByte(' ')
-		sb.WriteByte('"')
-		sb.WriteString(column)
-		sb.WriteByte('"')
+		tail[i].nameSQL(&sb)
 		sb.WriteByte('=')
 		sb.WriteByte('$')
-		sb.WriteString(strconv.Itoa(i + 3))
+		sb.WriteString(strconv.Itoa(len(t.PrimaryKeys) + i + 2))
 	}
 	return sb.String()
 }
@@ -394,26 +447,29 @@ func setListSQL(columns []string) string {
 // exists but has a different schema, it will not be changed.
 func (t *Table) Ensure(db *sql.DB) error {
 	if _, err := db.Exec(fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS \"%s\" (%s)",
+		"CREATE TABLE IF NOT EXISTS \"%s\" %s",
 		t.Name,
-		createColumnsSQL(t.Columns, t.IDColumn().Name),
+		t.createColumnsSQL(),
 	)); err != nil {
 		return fmt.Errorf("creating `%s` postgres table: %w", t.Name, err)
 	}
 	return nil
 }
 
-func createColumnsSQL(columns []Column, pkey string) string {
-	if len(columns) < 1 {
-		return ""
-	}
+func (t *Table) createColumnsSQL() string {
 	var sb strings.Builder
-	columns[0].createSQL(&sb, pkey)
-	for i := range columns[1:] {
+	sb.WriteByte('(')
+	t.PrimaryKeys[0].createSQL(&sb)
+	tail := append(t.PrimaryKeys[1:], t.OtherColumns...)
+	for i := range tail {
 		sb.WriteByte(',')
 		sb.WriteByte(' ')
-		columns[i+1].createSQL(&sb, pkey)
+		tail[i].createSQL(&sb)
 	}
+	sb.WriteString(", PRIMARY KEY (")
+	t.primaryKeysNames(&sb)
+	sb.WriteByte(')') // close `PRIMARY KEY (`
+	sb.WriteByte(')')
 	return sb.String()
 }
 
@@ -459,8 +515,4 @@ type Item interface {
 	// it *with pointers* to data in the item. This is used for operations
 	// which retrieve data from the database.
 	Scan([]interface{})
-
-	// ID returns the value which corresponds to the table's primary key
-	// column.
-	ID() interface{}
 }

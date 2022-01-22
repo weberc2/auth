@@ -62,7 +62,11 @@ func (pgus *PGUserStore) Upsert(user *types.UserEntry) error {
 // user ID exists, `types.ErrUserNotFound` is returned.
 func (pgus *PGUserStore) Get(user types.UserID) (*types.UserEntry, error) {
 	var entry userEntry
-	if err := Table.Get((*sql.DB)(pgus), user, &entry); err != nil {
+	if err := Table.Get(
+		(*sql.DB)(pgus),
+		&userEntry{User: user},
+		&entry,
+	); err != nil {
 		return nil, err
 	}
 	return (*types.UserEntry)(&entry), nil
@@ -90,7 +94,7 @@ func (pgus *PGUserStore) List() ([]*types.UserEntry, error) {
 // Delete deletes a user from the table. If no user is found for the provided
 // user ID, then `types.ErrUserNotFound` is returned.
 func (pgus *PGUserStore) Delete(user types.UserID) error {
-	return Table.Delete((*sql.DB)(pgus), user)
+	return Table.Delete((*sql.DB)(pgus), &userEntry{User: user})
 }
 
 // Implement `pgutil.Item` for `types.UserEntry`.
@@ -120,12 +124,14 @@ func (entry *userEntry) ID() interface{} { return entry.User }
 var (
 	Table = pgutil.Table{
 		Name: "users",
-		Columns: []pgutil.Column{
+		PrimaryKeys: []pgutil.Column{
 			{
 				Name: "user",
 				Type: "VARCHAR(32)",
 				Null: false,
 			},
+		},
+		OtherColumns: []pgutil.Column{
 			{
 				Name:   "email",
 				Type:   "VARCHAR(128)",
