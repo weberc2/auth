@@ -23,6 +23,10 @@ type Column struct {
 	// column, this error will be returned.
 	Unique error
 
+	// Default is the default value (if any) that a column should have. `nil`
+	// implies that the column has no default value.
+	Default SQLer
+
 	// Type contains the name of the column's type, e.g., `VARCHAR(255)` or
 	// `TIMESTAMPTZ`.
 	Type string
@@ -44,6 +48,12 @@ func (c *Column) createSQL(sb *strings.Builder) {
 	// unique
 	if c.Unique != nil {
 		sb.WriteString(" UNIQUE")
+	}
+
+	// default
+	if c.Default != nil {
+		sb.WriteString(" DEFAULT ")
+		c.Default.SQL(sb)
 	}
 }
 
@@ -80,7 +90,7 @@ func columnsPredicate(
 	columnPredicate(sb, table, head, 1)
 	for i := range tail {
 		sb.WriteString(" AND ")
-		columnPredicate(sb, table, &tail[i], i+1)
+		columnPredicate(sb, table, &tail[i], i+2)
 	}
 }
 
@@ -193,16 +203,16 @@ func (t *Table) Exists(db *sql.DB, item Item) error {
 // Delete deletes the record with the provided ID, otherwise it returns the
 // Table's `NotFoundErr` field if no record exists with the provided ID.
 func (t *Table) Delete(db *sql.DB, id Item) error {
-	var names, predicate strings.Builder
+	var predicate strings.Builder
 	t.primaryKeysPredicate(&predicate)
-	t.primaryKeysNames(&names)
 	var dummy string
 	if err := db.QueryRow(
+		// `RETURNING` some value forces `Scan()` to return `sql.ErrNoRows` if
+		// no rows were deleted.
 		fmt.Sprintf(
-			"DELETE FROM \"%s\" WHERE %s RETURNING %s",
+			"DELETE FROM \"%s\" WHERE %s RETURNING 'dummy'",
 			t.Name,
 			predicate.String(),
-			names.String(),
 		),
 		t.primaryKeys(id)...,
 	).Scan(&dummy); err != nil {
@@ -263,17 +273,12 @@ func (t *Table) Update(db *sql.DB, item Item) error {
 }
 
 func (t *Table) updateSQL(columns []Column) string {
-	if len(columns) < 1 {
-		return ""
-	}
-
-	// There must be an ID column in position 0 and at least one other column
-	// to set because neither `UPDATE <table> SET WHERE <idColumn>=<id>` nor
-	// `UPDATE <table> WHERE <idColumn>=<id>` are valid SQL.
 	var predicate, names strings.Builder
 	t.primaryKeysPredicate(&predicate)
 	t.primaryKeysNames(&names)
 	return fmt.Sprintf(
+		// `RETURNING` some value forces `Scan()` to return `sql.ErrNoRows` if
+		// no rows were updated.
 		"UPDATE \"%s\" SET %s WHERE %s RETURNING %s",
 		t.Name,
 		t.setListSQL(columns),
@@ -282,40 +287,49 @@ func (t *Table) updateSQL(columns []Column) string {
 	)
 }
 
-func (t *Table) insertSQL() string {
-	var columnNames, placeholders strings.Builder
-	t.columnNames(&columnNames)
-	t.placeholders(&placeholders)
-
-	return fmt.Sprintf(
-		"INSERT INTO \"%s\" (%s) VALUES(%s)",
-		t.Name,
-		columnNames.String(),
-		placeholders.String(),
-	)
+func (t *Table) insertSQL(columns []Column) string {
+	var sb strings.Builder
+	sb.WriteString("INSERT INTO \"")
+	sb.WriteString(t.Name)
+	sb.WriteString("\" (")
+	columnsNames(&sb, &columns[0], columns[1:]...)
+	sb.WriteString(") VALUES(")
+	placeholders(&sb, len(columns))
+	sb.WriteByte(')')
+	return sb.String()
 }
 
 func (t *Table) placeholders(sb *strings.Builder) {
-	sb.WriteString("$1")
+	placeholders(sb, len(t.PrimaryKeys)+len(t.OtherColumns))
+}
 
-	for i := 1; i < len(t.PrimaryKeys)+len(t.OtherColumns); i++ {
+func placeholders(sb *strings.Builder, n int) {
+	if n < 1 {
+		return
+	}
+
+	sb.WriteByte('$')
+	sb.WriteByte('1')
+
+	for i := 2; i < n+1; i++ {
 		sb.WriteByte(',')
 		sb.WriteByte(' ')
 		sb.WriteByte('$')
-		sb.WriteString(strconv.Itoa(i + 1))
+		sb.WriteString(strconv.Itoa(i))
 	}
 }
 
-func update(
-	db *sql.DB,
-	table *Table,
-	item Item,
-) error {
+func update(db *sql.DB, table *Table, item Item) error {
 	columns, values, err := table.columnsAndValues(item)
 	if err != nil {
 		return fmt.Errorf("building `update` SQL: %w", err)
 	}
-	rows, err := db.Query(table.updateSQL(columns), values...)
+	if len(columns) <= len(table.PrimaryKeys) {
+		return fmt.Errorf("building `update` SQL: no update columns provided")
+	}
+	rows, err := db.Query(
+		table.updateSQL(columns[len(table.PrimaryKeys):]),
+		values...)
 	if err != nil {
 		return fmt.Errorf(
 			"inserting row into postgres table `%s`: %w",
@@ -336,14 +350,14 @@ func update(
 func insert(
 	db *sql.DB,
 	table *Table,
-	sqlFunc func(*Table) string,
+	sqlFunc func(*Table, []Column) string,
 	item Item,
 ) error {
-	_, values, err := table.columnsAndValues(item)
+	columns, values, err := table.columnsAndValues(item)
 	if err != nil {
 		return fmt.Errorf("building `insert` SQL: %w", err)
 	}
-	if _, err := db.Exec(sqlFunc(table), values...); err != nil {
+	if _, err := db.Exec(sqlFunc(table, columns), values...); err != nil {
 		return fmt.Errorf(
 			"inserting row into postgres table `%s`: %w",
 			table.Name,
@@ -377,7 +391,7 @@ func (t *Table) columnsAndValues(item Item) ([]Column, []interface{}, error) {
 	buf := t.buffer()
 	item.Values(buf)
 	var (
-		columns      []Column
+		columns      = t.PrimaryKeys
 		nonNilValues = buf[:len(t.PrimaryKeys)]
 	)
 
@@ -397,28 +411,30 @@ func (t *Table) columnsAndValues(item Item) ([]Column, []interface{}, error) {
 			nonNilValues = append(nonNilValues, optional[i])
 			continue
 		}
-		if !t.OtherColumns[i].Null {
-			return nil, nil, fmt.Errorf(
-				"nil value found for NOT NULL column `%s`",
-				t.OtherColumns[i].Name,
-			)
-		}
 	}
 	return columns, nonNilValues, nil
 }
 
-func (t *Table) upsertSQL() string {
+func (t *Table) upsertSQL(columns []Column) string {
 	// build the SET list (the list of "<COLUMN>"=<value> pairs following the
 	// SET keyword)
-	var pkeys, predicate strings.Builder
+	var pkeys strings.Builder
 	t.primaryKeysNames(&pkeys)
-	t.primaryKeysPredicate(&predicate)
+	var suffix = "NOTHING"
+	if len(columns) > len(t.PrimaryKeys) {
+		var predicate strings.Builder
+		t.primaryKeysPredicate(&predicate)
+		suffix = fmt.Sprintf(
+			"UPDATE SET %s WHERE %s",
+			t.setListSQL(columns[len(t.PrimaryKeys):]),
+			predicate.String(),
+		)
+	}
 	return fmt.Sprintf(
-		"%s ON CONFLICT (%s) DO UPDATE SET %s WHERE %s",
-		t.insertSQL(),
+		"%s ON CONFLICT (%s) DO %s",
+		t.insertSQL(columns),
 		pkeys.String(),
-		t.setListSQL(t.OtherColumns),
-		predicate.String(),
+		suffix,
 	)
 }
 

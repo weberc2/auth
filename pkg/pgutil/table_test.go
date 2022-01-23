@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/weberc2/auth/pkg/types"
 	pz "github.com/weberc2/httpeasy"
@@ -143,7 +144,7 @@ func TestTable_Update(t *testing.T) {
 			}),
 		},
 		{
-			name: "missing not-null column",
+			name: "no columns to update",
 			table: Table{
 				Name:        "rows",
 				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
@@ -163,8 +164,7 @@ func TestTable_Update(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				wanted := "building `update` SQL: nil value found for NOT " +
-					"NULL column `email`"
+				wanted := "building `update` SQL: no update columns provided"
 				if found.Error() != wanted {
 					t.Fatalf("wanted `%s`; found `%v`", wanted, found.Error())
 				}
@@ -205,7 +205,7 @@ func TestTable_Update(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			newItem, err := DynamicItemFactoryFromTable(&testCase.table)
+			newItem, err := ZeroedDynamicItemFactoryFromTable(&testCase.table)
 			if err != nil {
 				t.Fatalf(
 					"unexpected error building DynamicItemFactory: %v",
@@ -355,10 +355,15 @@ func TestTable_Upsert(t *testing.T) {
 				{NewInteger(0), NewString("user@example.org")},
 			},
 			wantedErr: types.WantedErrFunc(func(found error) error {
-				wanted := "building `insert` SQL: nil value found for NOT " +
-					"NULL column `email`"
+				wanted := "inserting row into postgres table `rows`: " +
+					"pq: null value in column \"email\" of relation " +
+					"\"rows\" violates not-null constraint"
 				if found.Error() != wanted {
-					return fmt.Errorf("wanted `%s`; found `%s`", wanted, found.Error())
+					return fmt.Errorf(
+						"wanted `%s`; found `%s`",
+						wanted,
+						found.Error(),
+					)
 				}
 				return nil
 			}),
@@ -397,13 +402,21 @@ func TestTable_Upsert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			items, err := result.ToDynamicItems(
-				DynamicItemFactory(NilInteger, NilString),
-			)
+			newItem, err := ZeroedDynamicItemFactoryFromTable(&testCase.table)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error building DynamicItemFactory: %v",
+					err,
+				)
+			}
+			items, err := result.ToDynamicItems(newItem)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := CompareDynamicItems(testCase.wantedState, items); err != nil {
+			if err := CompareDynamicItems(
+				testCase.wantedState,
+				items,
+			); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -414,9 +427,9 @@ func TestTable_Insert(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
 		table       Table
-		state       []row
-		input       *row
-		wantedState []row
+		state       []DynamicItem
+		input       DynamicItem
+		wantedState []DynamicItem
 		wantedErr   types.WantedError
 	}{
 		{
@@ -432,8 +445,13 @@ func TestTable_Insert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			input:       &row{0, "user@example.org"},
-			wantedState: []row{{0, "user@example.org"}},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("user@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
 		},
 		{
 			name: "exists",
@@ -448,10 +466,17 @@ func TestTable_Insert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			state:       []row{{0, "user@example.org"}},
-			input:       &row{0, "user@example.org"},
-			wantedState: []row{{0, "user@example.org"}},
-			wantedErr:   errRowExists,
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{
+				NewInteger(0),
+				NewString("user@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: errRowExists,
 		},
 		{
 			name: "unique constraint violation",
@@ -466,10 +491,38 @@ func TestTable_Insert(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			state:       []row{{0, "user@example.org"}},
-			input:       &row{1, "user@example.org"},
-			wantedState: []row{{0, "user@example.org"}},
-			wantedErr:   types.ErrEmailExists,
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{
+				NewInteger(1),
+				NewString("user@example.org"),
+			},
+			wantedState: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			wantedErr: types.ErrEmailExists,
+		},
+		{
+			name: "default values",
+			table: Table{
+				Name:        "rows",
+				PrimaryKeys: []Column{{Name: "id", Type: "INTEGER"}},
+				OtherColumns: []Column{{
+					Name: "created",
+					Type: "TIMESTAMPTZ",
+					Default: NewTime(
+						time.Date(2022, 1, 23, 0, 0, 0, 0, time.UTC),
+					),
+				}},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			input: DynamicItem{NewInteger(0), nil},
+			wantedState: []DynamicItem{{
+				NewInteger(0),
+				NewTime(time.Date(2022, 1, 23, 0, 0, 0, 0, time.UTC)),
+			}},
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -505,11 +558,21 @@ func TestTable_Insert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			rows, err := resultToRows(result)
+			newItem, err := ZeroedDynamicItemFactoryFromTable(&testCase.table)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error building DynamicItemFactory: %v",
+					err,
+				)
+			}
+			items, err := result.ToDynamicItems(newItem)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := compareRows(testCase.wantedState, rows); err != nil {
+			if err := CompareDynamicItems(
+				testCase.wantedState,
+				items,
+			); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -594,9 +657,9 @@ func TestTable_Delete(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
 		table       Table
-		state       []row
-		input       int
-		wantedState []row
+		state       []DynamicItem
+		input       DynamicItem
+		wantedState []DynamicItem
 		wantedErr   types.WantedError
 	}{
 		{
@@ -612,8 +675,10 @@ func TestTable_Delete(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			state: []row{{0, "user@example.org"}},
-			input: 0,
+			state: []DynamicItem{
+				{NewInteger(0), NewString("user@example.org")},
+			},
+			input: DynamicItem{NewInteger(0), nil},
 		},
 		{
 			name: "not found",
@@ -628,8 +693,22 @@ func TestTable_Delete(t *testing.T) {
 				ExistsErr:   errRowExists,
 				NotFoundErr: errRowNotFound,
 			},
-			input:     0,
+			input:     DynamicItem{NewInteger(0), nil},
 			wantedErr: errRowNotFound,
+		},
+		{
+			name: "composite keys simple",
+			table: Table{
+				Name: "daysOfYear",
+				PrimaryKeys: []Column{
+					{Name: "month", Type: "INTEGER"},
+					{Name: "day", Type: "INTEGER"},
+				},
+				ExistsErr:   errRowExists,
+				NotFoundErr: errRowNotFound,
+			},
+			state: []DynamicItem{{NewInteger(1), NewInteger(1)}},
+			input: DynamicItem{NewInteger(1), NewInteger(1)},
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -643,7 +722,7 @@ func TestTable_Delete(t *testing.T) {
 			}()
 
 			for i, row := range testCase.state {
-				if err := testCase.table.Insert(db, &row); err != nil {
+				if err := testCase.table.Insert(db, row); err != nil {
 					t.Fatalf(
 						"preparing test state: inserting row %d: %v",
 						i,
@@ -656,7 +735,7 @@ func TestTable_Delete(t *testing.T) {
 				testCase.wantedErr = types.NilError{}
 			}
 			if err := testCase.wantedErr.CompareErr(
-				testCase.table.Delete(db, &row{id: testCase.input}),
+				testCase.table.Delete(db, testCase.input),
 			); err != nil {
 				t.Fatal(err)
 			}
@@ -665,11 +744,22 @@ func TestTable_Delete(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error listing table rows: %v", err)
 			}
-			rows, err := resultToRows(result)
+
+			newItem, err := ZeroedDynamicItemFactoryFromTable(&testCase.table)
+			if err != nil {
+				t.Fatalf(
+					"unexpected error building DynamicItemFactory: %v",
+					err,
+				)
+			}
+			items, err := result.ToDynamicItems(newItem)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := compareRows(testCase.wantedState, rows); err != nil {
+			if err := CompareDynamicItems(
+				testCase.wantedState,
+				items,
+			); err != nil {
 				t.Fatal(err)
 			}
 		})

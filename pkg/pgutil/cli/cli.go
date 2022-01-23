@@ -200,7 +200,7 @@ func New(t *pgutil.Table) (*cli.App, error) {
 				if err != nil {
 					return err
 				}
-				newItem, err := pgutil.DynamicItemFactoryFromTable(t)
+				newItem, err := pgutil.ZeroedDynamicItemFactoryFromTable(t)
 				if err != nil {
 					return err
 				}

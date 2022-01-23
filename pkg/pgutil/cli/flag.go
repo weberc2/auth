@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gosimple/slug"
@@ -13,7 +14,7 @@ func insertFlags(t *pgutil.Table) []cli.Flag {
 	columns := t.Columns()
 	out := make([]cli.Flag, len(columns))
 	for i, c := range columns {
-		flag, err := newFlag(c.Type, slug.Make(c.Name), true)
+		flag, err := flagFromColumn(&columns[i], false)
 		if err != nil {
 			panic(fmt.Errorf("column `%s`: %w", c.Name, err))
 		}
@@ -26,7 +27,7 @@ func updateFlags(t *pgutil.Table) []cli.Flag {
 	columns := t.Columns()
 	out := make([]cli.Flag, len(columns))
 	for i, c := range columns {
-		flag, err := newFlag(c.Type, slug.Make(c.Name), true)
+		flag, err := flagFromColumn(&columns[i], true)
 		if err != nil {
 			panic(fmt.Errorf("column `%s`: %w", c.Name, err))
 		}
@@ -35,23 +36,46 @@ func updateFlags(t *pgutil.Table) []cli.Flag {
 	return out
 }
 
-func newFlag(columnType string, flag string, required bool) (cli.Flag, error) {
-	valueType, err := pgutil.ValueTypeFromColumnType(columnType)
+func flagFromColumn(c *pgutil.Column, update bool) (cli.Flag, error) {
+	flag := slug.Make(c.Name)
+	optional := update || c.Null || c.Default != nil
+	valueType, err := pgutil.ValueTypeFromColumnType(c.Type)
 	if err != nil {
 		return nil, err
 	}
+	deftext := "<none>"
+	if c.Default != nil {
+		var sb strings.Builder
+		sb.WriteByte('`')
+		c.Default.SQL(&sb)
+		sb.WriteByte('`')
+		deftext = sb.String()
+	}
 	switch valueType {
 	case pgutil.ValueTypeBoolean:
-		return &cli.BoolFlag{Name: flag, Required: required}, nil
+		return &cli.BoolFlag{
+			Name:        flag,
+			DefaultText: deftext,
+			Required:    !optional,
+		}, nil
 	case pgutil.ValueTypeString:
-		return &cli.StringFlag{Name: flag, Required: required}, nil
+		return &cli.StringFlag{
+			Name:        flag,
+			DefaultText: deftext,
+			Required:    !optional,
+		}, nil
 	case pgutil.ValueTypeInteger:
-		return &cli.IntFlag{Name: flag, Required: required}, nil
+		return &cli.IntFlag{
+			Name:        flag,
+			DefaultText: deftext,
+			Required:    !optional,
+		}, nil
 	case pgutil.ValueTypeTime:
 		return &cli.TimestampFlag{
-			Name:     flag,
-			Required: required,
-			Layout:   time.RFC3339,
+			Name:        flag,
+			DefaultText: deftext,
+			Required:    !optional,
+			Layout:      time.RFC3339,
 		}, nil
 	default:
 		panic(fmt.Sprintf("invalid value type: %d", valueType))
@@ -61,7 +85,7 @@ func newFlag(columnType string, flag string, required bool) (cli.Flag, error) {
 func requiredColumnFlags(columns []pgutil.Column) []cli.Flag {
 	out := make([]cli.Flag, len(columns))
 	for i, c := range columns {
-		f, err := newFlag(c.Type, slug.Make(c.Name), true)
+		f, err := flagFromColumn(&columns[i], false)
 		if err != nil {
 			panic(fmt.Sprintf("column `%s`: %v", c.Name, err))
 		}
@@ -97,16 +121,27 @@ func flagValue(
 	}
 	switch valueType {
 	case pgutil.ValueTypeBoolean:
-		return pgutil.NewBoolean(ctx.Bool(flag)), nil
-	case pgutil.ValueTypeString:
-		return pgutil.NewString(ctx.String(flag)), nil
-	case pgutil.ValueTypeInteger:
-		return pgutil.NewInteger(ctx.Int(flag)), nil
-	case pgutil.ValueTypeTime:
-		if t := ctx.Timestamp(flag); t != nil {
-			return pgutil.NewTime(*t), nil
+		if ctx.IsSet(flag) {
+			return pgutil.NewBoolean(ctx.Bool(flag)), nil
 		}
-		return nil, nil
+		return pgutil.NilBoolean(), nil
+	case pgutil.ValueTypeString:
+		if ctx.IsSet(flag) {
+			return pgutil.NewString(ctx.String(flag)), nil
+		}
+		return pgutil.NilString(), nil
+	case pgutil.ValueTypeInteger:
+		if ctx.IsSet(flag) {
+			return pgutil.NewInteger(ctx.Int(flag)), nil
+		}
+		return pgutil.NilInteger(), nil
+	case pgutil.ValueTypeTime:
+		if ctx.IsSet(flag) {
+			if t := ctx.Timestamp(flag); t != nil {
+				return pgutil.NewTime(*t), nil
+			}
+		}
+		return pgutil.NilTime(), nil
 	default:
 		panic(fmt.Sprintf("invalid value type: %d", valueType))
 	}
