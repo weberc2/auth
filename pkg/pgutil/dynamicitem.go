@@ -215,6 +215,9 @@ func (t Time) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Time.Format(time.Time(t), time.RFC3339))
 }
 
+// NewBoolean creates a new `*Boolean` object.
+func NewBoolean(b bool) *Boolean { return (*Boolean)(&b) }
+
 // NewString creates a new `*String` object.
 func NewString(s string) *String { return (*String)(&s) }
 

@@ -41,6 +41,8 @@ func newFlag(columnType string, flag string, required bool) (cli.Flag, error) {
 		return nil, err
 	}
 	switch valueType {
+	case pgutil.ValueTypeBoolean:
+		return &cli.BoolFlag{Name: flag, Required: required}, nil
 	case pgutil.ValueTypeString:
 		return &cli.StringFlag{Name: flag, Required: required}, nil
 	case pgutil.ValueTypeInteger:
@@ -94,6 +96,8 @@ func flagValue(
 		return nil, err
 	}
 	switch valueType {
+	case pgutil.ValueTypeBoolean:
+		return pgutil.NewBoolean(ctx.Bool(flag)), nil
 	case pgutil.ValueTypeString:
 		return pgutil.NewString(ctx.String(flag)), nil
 	case pgutil.ValueTypeInteger:
