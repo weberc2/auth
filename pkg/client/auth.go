@@ -13,20 +13,13 @@ type Authenticator struct {
 	Key *ecdsa.PublicKey
 }
 
-func (a *Authenticator) AuthN(authType AuthType, h pz.Handler) pz.Handler {
-	return func(r pz.Request) pz.Response {
-		result := authType.validate(a.Key, r)
-		r.Headers.Add("User", result.User)
-		return h(r).WithLogging(result)
-	}
-}
-
-func (a *Authenticator) AuthZ(authType AuthType, h pz.Handler) pz.Handler {
+func (a *Authenticator) Auth(authType AuthType, h pz.Handler) pz.Handler {
 	return func(r pz.Request) pz.Response {
 		result := authType.validate(a.Key, r)
 		if result.User == "" {
 			return pz.Unauthorized(nil, result)
 		}
+		r.Headers.Add("User", result.User)
 		return h(r).WithLogging(result)
 	}
 }
