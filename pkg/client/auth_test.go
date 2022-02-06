@@ -9,41 +9,65 @@ import (
 	pz "github.com/weberc2/httpeasy"
 )
 
-func TestAuthenticator_Auth(t *testing.T) {
+func TestAuthenticator(t *testing.T) {
 	for _, testCase := range []struct {
-		name       string
-		authType   AuthType
-		wantedUser string
+		name          string
+		method        func(*Authenticator, AuthType, pz.Handler) pz.Handler
+		authResult    *result
+		wantedUser    string
+		wantedInvoked bool
 	}{
 		{
-			name: "success",
-			authType: authTypeMock(
-				func(_ *ecdsa.PublicKey, r pz.Request) *result {
-					return resultOK("success", "user")
-				},
-			),
-			wantedUser: "user",
+			name:          "auth success",
+			method:        (*Authenticator).Auth,
+			authResult:    resultOK("success", "user"),
+			wantedUser:    "user",
+			wantedInvoked: true,
 		},
 		{
-			name: "failure",
-			authType: authTypeMock(
-				func(_ *ecdsa.PublicKey, r pz.Request) *result {
-					return resultErr("ERR", errors.New("an error occurred"))
-				},
-			),
-			wantedUser: "",
+			name:          "auth failure",
+			method:        (*Authenticator).Auth,
+			authResult:    resultErr("ERR", errors.New("an error occurred")),
+			wantedUser:    "",
+			wantedInvoked: false,
+		},
+		{
+			name:          "optional success",
+			method:        (*Authenticator).Optional,
+			authResult:    resultOK("success", "user"),
+			wantedUser:    "user",
+			wantedInvoked: true,
+		},
+		{
+			name:          "optional failure",
+			method:        (*Authenticator).Optional,
+			authResult:    resultErr("ERR", errors.New("an error occurred")),
+			wantedUser:    "",
+			wantedInvoked: true,
 		},
 	} {
 		var user string
-		new(Authenticator).Auth(
-			testCase.authType,
+		var invoked bool
+		testCase.method(
+			new(Authenticator),
+			authTypeMock(func(_ *ecdsa.PublicKey, r pz.Request) *result {
+				return testCase.authResult
+			}),
 			func(r pz.Request) pz.Response {
 				user = r.Headers.Get("User")
+				invoked = true
 				return pz.Ok(nil, nil)
 			},
 		)(pz.Request{Headers: http.Header{}})
 		if user != testCase.wantedUser {
 			t.Fatalf("wanted user `%s`; found `%s`", testCase.wantedUser, user)
+		}
+		if invoked != testCase.wantedInvoked {
+			t.Fatalf(
+				"wanted user `%t`; found `%t`",
+				testCase.wantedInvoked,
+				invoked,
+			)
 		}
 	}
 }

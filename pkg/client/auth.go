@@ -24,6 +24,16 @@ func (a *Authenticator) Auth(authType AuthType, h pz.Handler) pz.Handler {
 	}
 }
 
+func (a *Authenticator) Optional(authType AuthType, h pz.Handler) pz.Handler {
+	return func(r pz.Request) pz.Response {
+		result := authType.validate(a.Key, r)
+		if result.User != "" {
+			r.Headers.Add("User", result.User)
+		}
+		return h(r).WithLogging(result)
+	}
+}
+
 type AuthType interface {
 	validate(key *ecdsa.PublicKey, r pz.Request) *result
 }
