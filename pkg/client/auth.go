@@ -35,7 +35,7 @@ func (a *Authenticator) Optional(authType AuthType, h pz.Handler) pz.Handler {
 }
 
 type AuthType interface {
-	validate(key *ecdsa.PublicKey, r pz.Request) *result
+	validate(key *ecdsa.PublicKey, r pz.Request) *Result
 }
 
 type AuthTypeClientProgram struct{}
@@ -43,10 +43,10 @@ type AuthTypeClientProgram struct{}
 func (atcp AuthTypeClientProgram) validate(
 	key *ecdsa.PublicKey,
 	r pz.Request,
-) *result {
+) *Result {
 	authorization := r.Headers.Get("Authorization")
 	if !strings.HasPrefix(authorization, "Bearer ") {
-		return resultErr(
+		return ResultErr(
 			"invalid access token",
 			fmt.Errorf("missing `Bearer` prefix"),
 		)
@@ -54,24 +54,36 @@ func (atcp AuthTypeClientProgram) validate(
 
 	user, err := validateAccessToken(authorization[len("Bearer "):], key)
 	if err != nil {
-		return resultErr("invalid access token", err)
+		return ResultErr("invalid access token", err)
 	}
 
-	return resultOK("successfully validated access token", user)
+	return ResultOK("successfully validated access token", user)
 }
 
-type result struct {
+type Result struct {
 	Message string `json:"message"`
 	Error   string `json:"error,omitempty"`
 	User    string `json:"user,omitempty"`
 }
 
-func resultErr(message string, err error) *result {
-	return &result{Message: message, Error: err.Error()}
+func ResultErr(message string, err error) *Result {
+	return &Result{Message: message, Error: err.Error()}
 }
 
-func resultOK(message string, user string) *result {
-	return &result{Message: message, User: user}
+func ResultOK(message string, user string) *Result {
+	return &Result{Message: message, User: user}
+}
+
+func ConstantAuthType(r *Result) AuthType {
+	return AuthTypeFunc(
+		func(*ecdsa.PublicKey, pz.Request) *Result { return r },
+	)
+}
+
+type AuthTypeFunc func(*ecdsa.PublicKey, pz.Request) *Result
+
+func (atf AuthTypeFunc) validate(k *ecdsa.PublicKey, r pz.Request) *Result {
+	return atf(k, r)
 }
 
 type AuthTypeWebServer struct {
@@ -81,25 +93,25 @@ type AuthTypeWebServer struct {
 func (atws *AuthTypeWebServer) validate(
 	key *ecdsa.PublicKey,
 	r pz.Request,
-) *result {
+) *Result {
 	accessCookie, err := r.Cookie("Access-Token")
 	if err != nil {
-		return resultErr("missing `Access-Token` cookie", err)
+		return ResultErr("missing `Access-Token` cookie", err)
 	}
 
 	refreshCookie, err := r.Cookie("Refresh-Token")
 	if err != nil {
-		return resultErr("missing `Refresh-Token` cookie", err)
+		return ResultErr("missing `Refresh-Token` cookie", err)
 	}
 
 	accessToken, err := atws.decryptCookie(accessCookie)
 	if err != nil {
-		return resultErr("decrypting `Access-Token` cookie", err)
+		return ResultErr("decrypting `Access-Token` cookie", err)
 	}
 
 	refreshToken, err := atws.decryptCookie(refreshCookie)
 	if err != nil {
-		return resultErr("decrypting `Refresh-Token` cookie", err)
+		return ResultErr("decrypting `Refresh-Token` cookie", err)
 	}
 
 	user, err := validateAccessToken(accessToken, key)
@@ -109,7 +121,7 @@ func (atws *AuthTypeWebServer) validate(
 			if masked == jwt.ValidationErrorExpired {
 				rsp, err := atws.Client.Refresh(refreshToken)
 				if err != nil {
-					return resultErr("refreshing access token", err)
+					return ResultErr("refreshing access token", err)
 				}
 
 				// We can probably trust that the token itself is good since
@@ -118,22 +130,22 @@ func (atws *AuthTypeWebServer) validate(
 				// failed to parse because the token was expired.
 				user, err := validateAccessToken(rsp.AccessToken, key)
 				if err != nil {
-					return resultErr("parsing `sub` (user) claim", err)
+					return ResultErr("parsing `sub` (user) claim", err)
 				}
 
 				encrypted, err := atws.Encrypt(rsp.AccessToken)
 				if err != nil {
-					return resultErr("encrypting access token", err)
+					return ResultErr("encrypting access token", err)
 				}
 				accessCookie.Value = encrypted
-				return resultOK("successfully refreshed access token", user)
+				return ResultOK("successfully refreshed access token", user)
 			}
-			return resultErr("validating access token", err)
+			return ResultErr("validating access token", err)
 		}
-		return resultErr("parsing access token", err)
+		return ResultErr("parsing access token", err)
 	}
 
-	return resultOK("successfully validated access token", user)
+	return ResultOK("successfully validated access token", user)
 }
 
 func validateAccessToken(token string, key *ecdsa.PublicKey) (string, error) {

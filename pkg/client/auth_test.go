@@ -13,35 +13,35 @@ func TestAuthenticator(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
 		method        func(*Authenticator, AuthType, pz.Handler) pz.Handler
-		authResult    *result
+		authResult    *Result
 		wantedUser    string
 		wantedInvoked bool
 	}{
 		{
 			name:          "auth success",
 			method:        (*Authenticator).Auth,
-			authResult:    resultOK("success", "user"),
+			authResult:    ResultOK("success", "user"),
 			wantedUser:    "user",
 			wantedInvoked: true,
 		},
 		{
 			name:          "auth failure",
 			method:        (*Authenticator).Auth,
-			authResult:    resultErr("ERR", errors.New("an error occurred")),
+			authResult:    ResultErr("ERR", errors.New("an error occurred")),
 			wantedUser:    "",
 			wantedInvoked: false,
 		},
 		{
 			name:          "optional success",
 			method:        (*Authenticator).Optional,
-			authResult:    resultOK("success", "user"),
+			authResult:    ResultOK("success", "user"),
 			wantedUser:    "user",
 			wantedInvoked: true,
 		},
 		{
 			name:          "optional failure",
 			method:        (*Authenticator).Optional,
-			authResult:    resultErr("ERR", errors.New("an error occurred")),
+			authResult:    ResultErr("ERR", errors.New("an error occurred")),
 			wantedUser:    "",
 			wantedInvoked: true,
 		},
@@ -50,7 +50,7 @@ func TestAuthenticator(t *testing.T) {
 		var invoked bool
 		testCase.method(
 			new(Authenticator),
-			authTypeMock(func(_ *ecdsa.PublicKey, r pz.Request) *result {
+			AuthTypeFunc(func(_ *ecdsa.PublicKey, r pz.Request) *Result {
 				return testCase.authResult
 			}),
 			func(r pz.Request) pz.Response {
@@ -70,10 +70,4 @@ func TestAuthenticator(t *testing.T) {
 			)
 		}
 	}
-}
-
-type authTypeMock func(key *ecdsa.PublicKey, r pz.Request) *result
-
-func (f authTypeMock) validate(key *ecdsa.PublicKey, r pz.Request) *result {
-	return f(key, r)
 }
