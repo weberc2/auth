@@ -299,10 +299,6 @@ func (t *Table) insertSQL(columns []Column) string {
 	return sb.String()
 }
 
-func (t *Table) placeholders(sb *strings.Builder) {
-	placeholders(sb, len(t.PrimaryKeys)+len(t.OtherColumns))
-}
-
 func placeholders(sb *strings.Builder, n int) {
 	if n < 1 {
 		return

@@ -806,32 +806,6 @@ func (r *row) compare(found *row) error {
 	return nil
 }
 
-func compareRows(wanted, found []row) error {
-	if len(wanted) != len(found) {
-		return fmt.Errorf("wanted %d rows; found %d", len(wanted), len(found))
-	}
-
-	for i := range wanted {
-		if err := wanted[i].compare(&found[i]); err != nil {
-			return fmt.Errorf("mismatch on row %d: %w", i, err)
-		}
-	}
-
-	return nil
-}
-
-func resultToRows(result *Result) ([]row, error) {
-	var rows []row
-	for result.Next() {
-		var row row
-		if err := result.Scan(&row); err != nil {
-			return nil, fmt.Errorf("unexpected error scanning result: %w", err)
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
-}
-
 var (
 	db = func() *sql.DB {
 		db, err := OpenEnvPing()
