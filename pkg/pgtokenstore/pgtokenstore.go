@@ -6,8 +6,8 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/weberc2/auth/pkg/pgutil"
 	"github.com/weberc2/auth/pkg/auth/types"
+	"github.com/weberc2/auth/pkg/pgutil"
 )
 
 type PGTokenStore sql.DB

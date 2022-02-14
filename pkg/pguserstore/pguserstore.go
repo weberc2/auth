@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	_ "github.com/lib/pq"
-	"github.com/weberc2/auth/pkg/pgutil"
 	"github.com/weberc2/auth/pkg/auth/types"
+	"github.com/weberc2/auth/pkg/pgutil"
 )
 
 // PGUserStore is a postgres implementation of `types.UserStore`.
