@@ -11,8 +11,8 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/weberc2/auth/pkg/auth"
-	"github.com/weberc2/auth/pkg/testsupport"
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/testsupport"
+	"github.com/weberc2/auth/pkg/auth/types"
 	pz "github.com/weberc2/httpeasy"
 	pztest "github.com/weberc2/httpeasy/testsupport"
 	"golang.org/x/crypto/bcrypt"

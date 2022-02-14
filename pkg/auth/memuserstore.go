@@ -1,6 +1,6 @@
 package auth
 
-import "github.com/weberc2/auth/pkg/types"
+import "github.com/weberc2/auth/pkg/auth/types"
 
 type MemUserStore struct {
 	Entries []*types.UserEntry

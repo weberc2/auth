@@ -11,7 +11,7 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/weberc2/auth/pkg/auth"
-	"github.com/weberc2/auth/pkg/testsupport"
+	"github.com/weberc2/auth/pkg/auth/testsupport"
 	pz "github.com/weberc2/httpeasy"
 	pztest "github.com/weberc2/httpeasy/testsupport"
 )

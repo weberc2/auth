@@ -3,7 +3,7 @@ package testsupport
 import (
 	"time"
 
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/types"
 )
 
 type TokenStoreFake map[string]time.Time

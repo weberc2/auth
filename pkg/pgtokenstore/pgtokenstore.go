@@ -7,7 +7,7 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/weberc2/auth/pkg/pgutil"
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/types"
 )
 
 type PGTokenStore sql.DB

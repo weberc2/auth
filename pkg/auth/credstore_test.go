@@ -3,7 +3,7 @@ package auth
 import (
 	"testing"
 
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/types"
 	"golang.org/x/crypto/bcrypt"
 )
 

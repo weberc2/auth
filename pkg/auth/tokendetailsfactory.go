@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/types"
 )
 
 type TokenDetails struct {

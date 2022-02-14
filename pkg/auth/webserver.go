@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/weberc2/auth/pkg/types"
+	"github.com/weberc2/auth/pkg/auth/types"
 	pz "github.com/weberc2/httpeasy"
 )
 
